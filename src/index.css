@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+:root {
+  --color-charcoal-900: #15191F;
+  --color-charcoal-700: #2A313B;
+  --color-charcoal-500: #5B6572;
+  --color-yellow-500: #FFC928;
+  --color-yellow-600: #E6B000;
+  --color-yellow-100: #FFF4CC;
+  --color-white: #FFFFFF;
+  --color-grey-100: #EEF1F4;
+  --color-grey-300: #D5DBE1;
+  --color-success: #1E8E5A;
+  --color-warning: #B26A00;
+  --color-error: #C62828;
+  --color-info: #1F5FBF;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  color: var(--color-charcoal-900);
+  background-color: #FFFFFF;
+}
+
+[dir="rtl"] {
+  font-family: 'Noto Naskh Arabic', 'Noto Nastaliq Urdu', system-ui, sans-serif;
+}
+
+[dir="rtl"] .urdu-editorial {
+  font-family: 'Noto Nastaliq Urdu', 'Noto Naskh Arabic', serif;
+  line-height: 2.1;
+}
+
+[dir="rtl"] h1, [dir="rtl"] h2, [dir="rtl"] h3 {
+  line-height: 1.7;
+}
+
+.font-display {
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+}
+
+.font-mono-numbers {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Logical RTL transitions and layout */
+input, textarea, select {
+  font-family: inherit;
+}
+
+/* Ensure touch targets meet minimum 44px */
+button, a.button-touch {
+  min-height: 44px;
+}

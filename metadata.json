@@ -1,0 +1,6 @@
+{
+  "name": "ABC Electrician Services - Professional Electrical Solutions",
+  "description": "Premium bilingual electrician services in Pakistan. Certified electrical repairs, residential & commercial wiring, online slot booking, and secure management platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
