@@ -36,9 +36,22 @@ import { AdminReviews } from './pages/admin/AdminReviews';
 import { AdminDataRequests } from './pages/admin/AdminDataRequests';
 import { AdminSettings } from './pages/admin/AdminSettings';
 import { AdminAuditLogs } from './pages/admin/AdminAuditLogs';
+import { PageTransition } from './motion';
+import { DevMotionPage } from './pages/dev/DevMotionPage';
 
 export default function App() {
-  const [currentView, setCurrentView] = useState('home');
+  const [currentView, setCurrentView] = useState(() => {
+    if (typeof window !== 'undefined') {
+      if (
+        window.location.pathname.includes('/dev/motion') ||
+        window.location.hash.includes('dev/motion') ||
+        window.location.search.includes('view=dev-motion')
+      ) {
+        return 'dev-motion';
+      }
+    }
+    return 'home';
+  });
   const [viewParam, setViewParam] = useState<string | undefined>(undefined);
 
   const handleNavigate = (view: string, param?: string) => {
@@ -66,29 +79,32 @@ export default function App() {
               <Header currentView={currentView} onNavigate={handleNavigate} />
 
               <main className="flex-1">
-                {currentView === 'home' && <HomePage onNavigate={handleNavigate} />}
-                {currentView === 'services' && <ServicesPage onNavigate={handleNavigate} />}
-                {currentView === 'service-detail' && (
-                  <ServiceDetailPage slug={viewParam || ''} onNavigate={handleNavigate} />
-                )}
-                {currentView === 'pricing' && <PricingPage onNavigate={handleNavigate} />}
-                {currentView === 'projects' && <ProjectsPage onNavigate={handleNavigate} />}
-                {currentView === 'about' && <AboutPage onNavigate={handleNavigate} />}
-                {currentView === 'reviews' && <ReviewsPage />}
-                {currentView === 'faq' && <FAQPage />}
-                {currentView === 'blog' && <BlogPage />}
-                {currentView === 'contact' && <ContactPage onNavigate={handleNavigate} />}
-                {currentView === 'book-service' && (
-                  <BookingWizard initialServiceId={viewParam} onNavigate={handleNavigate} />
-                )}
-                {currentView === 'track-booking' && (
-                  <TrackBookingPage initialReference={viewParam} onNavigate={handleNavigate} />
-                )}
-                {currentView === 'ai-diagnostics' && (
-                  <AIDiagnosticsPage onNavigate={handleNavigate} />
-                )}
-                {currentView === 'privacy-policy' && <LegalPage type="privacy" />}
-                {currentView === 'terms' && <LegalPage type="terms" />}
+                <PageTransition currentKey={currentView}>
+                  {currentView === 'home' && <HomePage onNavigate={handleNavigate} />}
+                  {currentView === 'services' && <ServicesPage onNavigate={handleNavigate} />}
+                  {currentView === 'service-detail' && (
+                    <ServiceDetailPage slug={viewParam || ''} onNavigate={handleNavigate} />
+                  )}
+                  {currentView === 'pricing' && <PricingPage onNavigate={handleNavigate} />}
+                  {currentView === 'projects' && <ProjectsPage onNavigate={handleNavigate} />}
+                  {currentView === 'about' && <AboutPage onNavigate={handleNavigate} />}
+                  {currentView === 'reviews' && <ReviewsPage />}
+                  {currentView === 'faq' && <FAQPage />}
+                  {currentView === 'blog' && <BlogPage />}
+                  {currentView === 'contact' && <ContactPage onNavigate={handleNavigate} />}
+                  {currentView === 'book-service' && (
+                    <BookingWizard initialServiceId={viewParam} onNavigate={handleNavigate} />
+                  )}
+                  {currentView === 'track-booking' && (
+                    <TrackBookingPage initialReference={viewParam} onNavigate={handleNavigate} />
+                  )}
+                  {currentView === 'ai-diagnostics' && (
+                    <AIDiagnosticsPage onNavigate={handleNavigate} />
+                  )}
+                  {currentView === 'privacy-policy' && <LegalPage type="privacy" />}
+                  {currentView === 'terms' && <LegalPage type="terms" />}
+                  {currentView === 'dev-motion' && <DevMotionPage />}
+                </PageTransition>
               </main>
 
               <Footer onNavigate={handleNavigate} />

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./motion/tokens.css";
 
 :root {
   --color-charcoal-900: #15191F;

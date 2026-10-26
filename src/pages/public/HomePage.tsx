@@ -18,6 +18,8 @@ import {
   Star,
   MapPin,
 } from 'lucide-react';
+import { CircuitBackground, CursorGlow, Reveal } from '../../motion';
+import { Button } from '../../components/ui/Button';
 
 interface HomePageProps {
   onNavigate: (view: string, param?: string) => void;
@@ -40,7 +42,8 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
     <div className="flex flex-col min-h-screen">
       {/* 1. HERO SECTION */}
       <section className="relative bg-[#15191F] text-white overflow-hidden py-14 lg:py-20">
-        <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#FFC928_1px,transparent_1px)] [background-size:24px_24px] pointer-events-none" />
+        <CircuitBackground intensity="normal" showParticles={true} />
+        <CursorGlow size={380} color="rgba(255, 201, 40, 0.12)" />
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 relative z-10">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
@@ -64,29 +67,33 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
 
               {/* CTAs */}
               <div className="flex flex-wrap items-center gap-4 pt-2">
-                <button
+                <Button
+                  variant="primary"
+                  size="lg"
                   onClick={() => onNavigate('book-service')}
-                  className="px-7 py-3.5 rounded-lg text-base font-bold bg-[#FFC928] hover:bg-[#E6B000] text-[#15191F] shadow-lg shadow-[#FFC928]/20 transition-all active:scale-[0.98] flex items-center gap-2"
                 >
                   <span>{t.hero.primaryCta}</span>
-                  <ArrowIcon className="w-4 h-4" />
-                </button>
+                </Button>
 
-                <a
+                <Button
+                  as="a"
                   href={`tel:${settings.phone}`}
-                  className="px-6 py-3.5 rounded-lg text-base font-semibold bg-[#2A313B] hover:bg-[#3D4754] text-white transition-all flex items-center gap-2 border border-[#3D4754]"
+                  variant="secondary"
+                  size="lg"
+                  icon={<Phone className="w-4 h-4 text-[#FFC928]" />}
                 >
-                  <Phone className="w-4 h-4 text-[#FFC928]" />
                   <span dir="ltr">{settings.phoneDisplay}</span>
-                </a>
+                </Button>
 
-                <button
+                <Button
+                  variant="outline"
+                  size="lg"
                   onClick={() => onNavigate('ai-diagnostics')}
-                  className="px-5 py-3.5 rounded-lg text-sm font-semibold bg-white/5 hover:bg-white/10 text-[#FFC928] border border-[#FFC928]/30 transition-all flex items-center gap-2"
+                  className="bg-white/5 hover:bg-white/10 text-[#FFC928] border-[#FFC928]/30"
+                  icon={<Sparkles className="w-4 h-4 text-[#FFC928]" />}
                 >
-                  <Sparkles className="w-4 h-4 text-[#FFC928]" />
                   <span>{t.hero.diagnosticCta}</span>
-                </button>
+                </Button>
               </div>
 
               {/* Trust Metric Micro-Grid */}

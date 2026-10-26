@@ -1,0 +1,142 @@
+/* ==========================================================================
+   ABC Electrician Services — "Live Current" Motion Design Tokens
+   Concept: Electricity in motion — yellow current traces on charcoal
+   ========================================================================== */
+
+:root {
+  /* Durations */
+  --motion-duration-instant: 90ms;
+  --motion-duration-fast: 160ms;
+  --motion-duration-normal: 260ms;
+  --motion-duration-slow: 480ms;
+  --motion-duration-circuit: 900ms;
+
+  /* Easings */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-circuit: cubic-bezier(0.7, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Glow Shadows */
+  --glow-ring: 0 0 0 1px rgba(255, 201, 40, 0.55);
+  --glow-ambient: 0 0 24px rgba(255, 201, 40, 0.35);
+  --glow-combined: 0 0 0 1px rgba(255, 201, 40, 0.55), 0 0 24px rgba(255, 201, 40, 0.35);
+  --glow-danger: 0 0 0 1px rgba(198, 40, 40, 0.7), 0 0 16px rgba(198, 40, 40, 0.3);
+
+  /* Electricity Colors */
+  --color-current: #FFC928;
+  --color-current-bright: #FFE082;
+  --color-current-dim: rgba(255, 201, 40, 0.15);
+  --color-charcoal: #15191F;
+  --color-charcoal-light: #2A313B;
+  --color-grid-line: rgba(255, 201, 40, 0.07);
+}
+
+/* Reduced Motion Overrides */
+@media (prefers-reduced-motion: reduce) {
+  :root,
+  [data-reduced-motion="true"] {
+    --motion-duration-instant: 1ms !important;
+    --motion-duration-fast: 50ms !important;
+    --motion-duration-normal: 100ms !important;
+    --motion-duration-slow: 150ms !important;
+    --motion-duration-circuit: 150ms !important;
+  }
+}
+
+[data-reduced-motion="true"] * {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+[data-reduced-motion="true"] .allow-fade {
+  transition: opacity 150ms ease-out !important;
+}
+
+/* Keyframes */
+@keyframes currentSweep {
+  0% {
+    transform: scaleX(0);
+    transform-origin: 0% 50%;
+    opacity: 0.3;
+  }
+  50% {
+    transform: scaleX(1);
+    transform-origin: 0% 50%;
+    opacity: 1;
+  }
+  100% {
+    transform: scaleX(1);
+    opacity: 0;
+  }
+}
+
+@keyframes powerOnFlicker {
+  0% { opacity: 0; }
+  30% { opacity: 0.45; }
+  50% { opacity: 0.2; }
+  75% { opacity: 0.9; }
+  100% { opacity: 1; }
+}
+
+@keyframes slowPulseRing {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(255, 201, 40, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 0 7px rgba(255, 201, 40, 0);
+  }
+}
+
+@keyframes ringShake {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-8deg); }
+  75% { transform: rotate(8deg); }
+}
+
+@keyframes shakeError {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+
+@keyframes traceClockwise {
+  0% { stroke-dashoffset: 280; }
+  100% { stroke-dashoffset: 0; }
+}
+
+@keyframes lightSweep {
+  0% {
+    transform: translateX(-120%) skewX(-20deg);
+  }
+  100% {
+    transform: translateX(220%) skewX(-20deg);
+  }
+}
+
+/* Utility Classes */
+.animate-power-on {
+  animation: powerOnFlicker var(--motion-duration-slow) var(--ease-circuit) forwards;
+}
+
+.animate-pulse-ring {
+  animation: slowPulseRing 3s infinite ease-in-out;
+}
+
+.animate-ring-shake {
+  animation: ringShake 450ms ease-in-out 2;
+}
+
+.animate-shake-error {
+  animation: shakeError 320ms ease-in-out 1;
+}
+
+/* Current progress line */
+.current-line-sweep {
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #FFC928, #FFE082, transparent);
+  box-shadow: 0 0 8px #FFC928;
+}
