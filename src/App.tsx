@@ -43,8 +43,18 @@ import { DevMotionPage } from './pages/dev/DevMotionPage';
 export default function App() {
   const [currentView, setCurrentView] = useState(() => {
     if (typeof window !== 'undefined') {
+      const path = window.location.pathname.replace(/\/+$/, '') || '/';
+      if (path.startsWith('/admin')) {
+        const allowedTabs = new Set([
+          'dashboard', 'bookings', 'technician-view', 'quotes', 'invoices',
+          'customers', 'inquiries', 'staff', 'services', 'reviews',
+          'data-requests', 'settings', 'audit-logs',
+        ]);
+        const requestedTab = path.split('/').filter(Boolean)[1] || 'dashboard';
+        return `admin-${allowedTabs.has(requestedTab) ? requestedTab : 'dashboard'}`;
+      }
       if (
-        window.location.pathname.includes('/dev/motion') ||
+        path.includes('/dev/motion') ||
         window.location.hash.includes('dev/motion') ||
         window.location.search.includes('view=dev-motion')
       ) {
@@ -66,6 +76,9 @@ export default function App() {
   const handleNavigate = (view: string, param?: string) => {
     setCurrentView(view);
     setViewParam(param);
+    if (view === 'home' && window.location.pathname.startsWith('/admin')) {
+      window.history.pushState({}, '', '/');
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -75,7 +88,14 @@ export default function App() {
   const adminTab = currentView.replace('admin-', '');
 
   const handleAdminTabNavigate = (tab: string) => {
-    setCurrentView(`admin-${tab}`);
+    const allowedTabs = new Set([
+      'dashboard', 'bookings', 'technician-view', 'quotes', 'invoices',
+      'customers', 'inquiries', 'staff', 'services', 'reviews',
+      'data-requests', 'settings', 'audit-logs',
+    ]);
+    const safeTab = allowedTabs.has(tab) ? tab : 'dashboard';
+    setCurrentView(`admin-${safeTab}`);
+    window.history.pushState({}, '', safeTab === 'dashboard' ? '/admin' : `/admin/${safeTab}`);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
