@@ -723,6 +723,128 @@ export const repository = {
   getQuoteById(id: string): Quote | undefined {
     return this.getQuotes().find((q) => q.id === id);
   },
+  async createOnlineQuote(
+    quote: Omit<Quote, 'id' | 'createdAt' | 'quoteNumber'>,
+    actorName = 'Admin'
+  ): Promise<Quote> {
+    if (!supabase) return this.createQuote(quote, actorName);
+
+    const { data, error } = await supabase.rpc('create_staff_quote', {
+      p_customer_name: quote.customerName,
+      p_customer_phone: quote.customerPhone,
+      p_customer_address: quote.customerAddress,
+      p_status: quote.status,
+      p_valid_until: quote.validUntil,
+      p_notes: quote.notes || null,
+      p_items: quote.items.map((item) => ({
+        itemType: item.itemType,
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+      })),
+      p_booking_id: quote.bookingId || null,
+      p_booking_reference: quote.bookingReference || null,
+      p_discount: quote.discount || 0,
+      p_tax_rate: quote.taxRate || 0,
+    });
+    if (error || !data) {
+      console.error('Quote creation failed:', error?.message);
+      throw new Error(error?.message?.includes('NOT_AUTHORIZED')
+        ? 'Your staff role cannot create quotations.'
+        : 'The quotation could not be saved. Check the customer details and line items.');
+    }
+    await recordRemoteAuditLog(actorName, 'QUOTE_CREATED', 'quote', String(data.id), `Created quotation ${data.quoteNumber} for PKR ${data.total}`);
+    await this.initializeRemoteAdminData();
+    return this.getQuotes().find((item) => item.id === data.id) || toCamelRecord<Quote>(data);
+  },
+
+  async convertOnlineQuoteToInvoice(quoteId: string, actorName = 'Admin'): Promise<Invoice> {
+    if (!supabase) {
+      const invoice = this.convertQuoteToInvoice(quoteId, actorName);
+      if (!invoice) throw new Error('Quotation was not found.');
+      return invoice;
+    }
+    const { data, error } = await supabase.rpc('convert_staff_quote_to_invoice', {
+      p_quote_id: quoteId,
+    });
+    if (error || !data) {
+      console.error('Quote conversion failed:', error?.message);
+      throw new Error(error?.message?.includes('QUOTE_NOT_CONVERTIBLE')
+        ? 'This quotation has already been approved or can no longer be converted.'
+        : 'The quotation could not be converted to an invoice.');
+    }
+    await recordRemoteAuditLog(actorName, 'QUOTE_CONVERTED_TO_INVOICE', 'quote', quoteId, `Created invoice ${data.invoiceNumber}`);
+    await this.initializeRemoteAdminData();
+    return this.getInvoices().find((item) => item.id === data.id) || toCamelRecord<Invoice>(data);
+  },
+
+  async createOnlineInvoice(
+    invoice: Omit<Invoice, 'id' | 'createdAt' | 'invoiceNumber'>,
+    actorName = 'Admin'
+  ): Promise<Invoice> {
+    if (!supabase) return this.createInvoice(invoice, actorName);
+
+    const { data, error } = await supabase.rpc('create_staff_invoice', {
+      p_customer_name: invoice.customerName,
+      p_customer_phone: invoice.customerPhone,
+      p_customer_address: invoice.customerAddress,
+      p_status: invoice.status,
+      p_issue_date: invoice.issueDate,
+      p_due_date: invoice.dueDate,
+      p_notes: invoice.notes || null,
+      p_items: invoice.items.map((item) => ({
+        itemType: item.itemType,
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+      })),
+      p_booking_id: invoice.bookingId || null,
+      p_booking_reference: invoice.bookingReference || null,
+      p_discount: invoice.discount || 0,
+      p_tax_rate: invoice.taxRate || 0,
+    });
+    if (error || !data) {
+      console.error('Invoice creation failed:', error?.message);
+      throw new Error(error?.message?.includes('NOT_AUTHORIZED')
+        ? 'Your staff role cannot create invoices.'
+        : 'The invoice could not be saved. Check the customer details and line items.');
+    }
+    await recordRemoteAuditLog(actorName, 'INVOICE_CREATED', 'invoice', String(data.id), `Created invoice ${data.invoiceNumber} for PKR ${data.total}`);
+    await this.initializeRemoteAdminData();
+    return this.getInvoices().find((item) => item.id === data.id) || toCamelRecord<Invoice>(data);
+  },
+
+  async recordOnlinePayment(
+    invoiceId: string,
+    payment: Omit<Payment, 'id' | 'paidAt'>,
+    actorName = 'Owner'
+  ): Promise<Invoice> {
+    if (!supabase) {
+      const invoice = this.recordPayment(invoiceId, payment, actorName);
+      if (!invoice) throw new Error('Invoice not found.');
+      return invoice;
+    }
+    const { data, error } = await supabase.rpc('record_staff_payment', {
+      p_invoice_id: invoiceId,
+      p_amount: payment.amount,
+      p_method: payment.method,
+      p_notes: payment.notes || null,
+    });
+    if (error || !data) {
+      console.error('Payment recording failed:', error?.message);
+      throw new Error(error?.message?.includes('PAYMENT_EXCEEDS_BALANCE')
+        ? 'Payment amount exceeds the remaining invoice balance.'
+        : error?.message?.includes('NOT_AUTHORIZED')
+          ? 'Only the owner can record payments.'
+          : 'Payment could not be recorded. Please verify the amount and payment method.');
+    }
+    await recordRemoteAuditLog(actorName, 'PAYMENT_RECORDED', 'invoice', invoiceId, `Payment of PKR ${payment.amount} via ${payment.method}`);
+    await this.initializeRemoteAdminData();
+    const updated = this.getInvoices().find((item) => item.id === invoiceId);
+    if (!updated) throw new Error('Payment was recorded, but the updated invoice could not be reloaded. Refresh the page.');
+    return updated;
+  },
+
   createQuote(quote: Omit<Quote, 'id' | 'createdAt' | 'quoteNumber'>, actorName = 'Admin'): Quote {
     const quotes = this.getQuotes();
     const seq = String(quotes.length + 1).padStart(4, '0');
