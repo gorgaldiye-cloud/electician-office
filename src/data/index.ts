@@ -1091,8 +1091,8 @@ export const repository = {
       };
 
       const staffRecords = rows(staffRows, 'staff profiles');
-      const staffById = new Map<string, any>(
-        staffRecords.map((row) => [row.id, toCamelRecord<Staff>(row)])
+      const staffById = new Map<string, Staff>(
+        staffRecords.map((row) => [row.id, toCamelRecord<Staff>(row)] as [string, Staff])
       );
 
       const historiesByBooking = new Map<string, any[]>();
