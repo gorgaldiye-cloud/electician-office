@@ -9,15 +9,26 @@ export const AdminReviews: React.FC = () => {
   const { language, t } = useLanguage();
   const { currentStaff } = useAuth();
 
-  const [reviews, setReviews] = useState<Review[]>(() => repository.getReviews(true));
+  const [reviews, setReviews] = useState<Review[]>(() => repository.getAdminReviews());
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const refresh = () => {
-    setReviews(repository.getReviews(true));
+    setReviews(repository.getAdminReviews());
   };
 
-  const handleModerate = (id: string, status: 'approved' | 'rejected') => {
-    repository.moderateReview(id, status, currentStaff.fullName);
-    refresh();
+  const handleModerate = async (id: string, status: 'approved' | 'rejected') => {
+    if (busyId) return;
+    setBusyId(id);
+    setErrorMessage(null);
+    try {
+      await repository.moderateOnlineReview(id, status, currentStaff.fullName);
+      refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Review moderation failed. Please try again.');
+    } finally {
+      setBusyId(null);
+    }
   };
 
   return (
@@ -32,6 +43,12 @@ export const AdminReviews: React.FC = () => {
             : 'Moderate customer testimonials and ratings before public display.'}
         </p>
       </div>
+
+      {errorMessage && (
+        <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {errorMessage}
+        </p>
+      )}
 
       <div className="space-y-4">
         {reviews.map((rev) => (
@@ -71,8 +88,9 @@ export const AdminReviews: React.FC = () => {
             <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
               {rev.moderationStatus !== 'approved' && (
                 <button
-                  onClick={() => handleModerate(rev.id, 'approved')}
-                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#1E8E5A] text-white hover:bg-[#167046] flex items-center gap-1"
+                  onClick={() => { void handleModerate(rev.id, 'approved'); }}
+                  disabled={busyId === rev.id}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#1E8E5A] text-white hover:bg-[#167046] flex items-center gap-1 disabled:opacity-50 disabled:cursor-wait"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   <span>Approve</span>
@@ -81,8 +99,9 @@ export const AdminReviews: React.FC = () => {
 
               {rev.moderationStatus !== 'rejected' && (
                 <button
-                  onClick={() => handleModerate(rev.id, 'rejected')}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#FDE8E8] text-[#C62828] hover:bg-[#F8B4B4] flex items-center gap-1"
+                  onClick={() => { void handleModerate(rev.id, 'rejected'); }}
+                  disabled={busyId === rev.id}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#FDE8E8] text-[#C62828] hover:bg-[#F8B4B4] flex items-center gap-1 disabled:opacity-50 disabled:cursor-wait"
                 >
                   <XCircle className="w-3.5 h-3.5" />
                   <span>Reject</span>
