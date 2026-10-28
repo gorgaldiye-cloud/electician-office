@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useAuth } from '../../context/AuthContext';
+import { repository } from '../../data';
 import {
   LayoutDashboard,
   CalendarCheck,
@@ -41,8 +42,42 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   const [loginPassword, setLoginPassword] = useState('');
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [loginMessage, setLoginMessage] = useState<string | null>(null);
+  const [isLoadingRecords, setIsLoadingRecords] = useState(false);
+  const [recordsReady, setRecordsReady] = useState(false);
+  const [recordsError, setRecordsError] = useState<string | null>(null);
+
   const pendingCount = repository.getBookings().filter((b) => b.status === 'pending').length;
   const newInquiriesCount = repository.getInquiries().filter((i) => i.status === 'new').length;
+
+  if (isStaff && currentStaff && currentRole && (isLoadingRecords || !recordsReady)) {
+    return (
+      <div className="min-h-screen bg-[#EEF1F4] flex items-center justify-center px-4">
+        <div className="bg-white rounded-2xl border border-[#D5DBE1] px-8 py-10 text-center shadow-sm">
+          <div className="mx-auto mb-4 h-10 w-10 rounded-full border-4 border-[#D5DBE1] border-t-[#B26A00] animate-spin" />
+          <p className="font-semibold text-[#15191F]">{language === 'ur' ? 'محفوظ ریکارڈ لوڈ ہو رہے ہیں…' : 'Loading secure business records…'}</p>
+          {recordsError && (
+            <div className="mt-4 space-y-3">
+              <p role="alert" className="text-sm text-red-700">{recordsError}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsLoadingRecords(true);
+                  setRecordsError(null);
+                  void repository.initializeRemoteAdminData()
+                    .then(() => setRecordsReady(true))
+                    .catch((error) => setRecordsError(error instanceof Error ? error.message : 'Unable to load staff records.'))
+                    .finally(() => setIsLoadingRecords(false));
+                }}
+                className="rounded-lg bg-[#15191F] px-4 py-2 text-sm font-bold text-white"
+              >
+                {language === 'ur' ? 'دوبارہ کوشش کریں' : 'Retry'}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -133,6 +168,32 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
       </div>
     );
   }
+
+  useEffect(() => {
+    let active = true;
+    if (!isStaff || !currentStaff) {
+      setRecordsReady(false);
+      setRecordsError(null);
+      return () => { active = false; };
+    }
+
+    setIsLoadingRecords(true);
+    setRecordsError(null);
+    void repository.initializeRemoteAdminData()
+      .then(() => {
+        if (active) setRecordsReady(true);
+      })
+      .catch((error) => {
+        if (active) {
+          setRecordsReady(false);
+          setRecordsError(error instanceof Error ? error.message : 'Unable to load staff records.');
+        }
+      })
+      .finally(() => {
+        if (active) setIsLoadingRecords(false);
+      });
+    return () => { active = false; };
+  }, [isStaff, currentStaff?.id]);
 
   const navItems = [
     { id: 'dashboard', label: t.admin.dashboard, icon: LayoutDashboard, show: true },
