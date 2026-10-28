@@ -775,7 +775,7 @@ export const repository = {
     }
     await recordRemoteAuditLog(actorName, 'QUOTE_CONVERTED_TO_INVOICE', 'quote', quoteId, `Created invoice ${data.invoiceNumber}`);
     await this.initializeRemoteAdminData();
-    return this.getInvoices().find((item) => item.id === data.id) || toCamelRecord<Invoice>(data);
+    return this.getInvoices().find((item) => item.id === data.id) || toCamelRecord<Invoice>({ ...data, total: data.total ?? this.getQuotes().find((item) => item.id === quoteId)?.total ?? 0 });
   },
 
   async createOnlineInvoice(
@@ -1278,7 +1278,8 @@ export const repository = {
           recordedBy: payment.recorded_by,
         })),
       }));
-      if (!invoiceRows.error && !invoiceItemRows.error && !paymentRows.error) {
+      if (!invoiceRows.error && !invoiceItemRows.error) {
+        // Payment rows are owner-only; a booking manager can still see invoices without payment details.
         setStored<Invoice[]>(STORAGE_KEYS.INVOICES, invoices);
       }
 
