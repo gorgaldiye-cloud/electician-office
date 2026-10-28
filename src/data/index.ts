@@ -690,86 +690,221 @@ export const repository = {
 
   // Store website bookings using the database's website-only INSERT policy. Anonymous clients
   // intentionally cannot SELECT the resulting private customer or booking rows.
+  async getOnlineAvailableSlots(
+    dateStr: string,
+    serviceId: string
+  ): Promise<{ time: string; start: string; end: string; available: boolean }[]> {
+    if (!supabase) return this.getAvailableSlots(dateStr, serviceId);
+    const { data, error } = await supabase.rpc('get_website_available_slots', {
+      p_service_id: serviceId,
+      p_date: dateStr,
+    });
+    if (error) {
+      console.error('Available slots query failed:', error.message);
+      throw new Error('Appointment times are temporarily unavailable. Please try again.');
+    }
+    return (Array.isArray(data) ? data : []).map((slot: any) => ({
+      time: String(slot.time),
+      start: String(slot.start),
+      end: String(slot.end),
+      available: Boolean(slot.available),
+    }));
+  },
+
+  async trackOnlineBooking(reference: string, phone: string): Promise<Booking | null> {
+    if (!supabase) {
+      const localBooking = this.getBookingByReference(reference);
+      if (!localBooking) return null;
+      const digits = (value: string) => value.replace(/\D/g, '');
+      return digits(localBooking.customerPhone) === digits(phone) ? localBooking : null;
+    }
+    const { data, error } = await supabase.rpc('track_website_booking', {
+      p_booking_reference: reference.trim().toUpperCase(),
+      p_customer_phone: phone.trim(),
+    });
+    if (error) {
+      console.error('Booking tracking failed:', error.message);
+      throw new Error('We could not verify those details right now. Please try again.');
+    }
+    if (!data) return null;
+    const booking = data as Booking;
+    setStored<Booking[]>(
+      STORAGE_KEYS.BOOKINGS,
+      [booking, ...this.getBookings().filter((item) => item.id !== booking.id)]
+    );
+    return booking;
+  },
+
+  async cancelOnlineBooking(reference: string, phone: string, reason: string): Promise<Booking> {
+    if (!supabase) {
+      const booking = this.getBookingByReference(reference);
+      if (!booking) throw new Error('Booking not found. Check the reference and phone number.');
+      const updated = this.cancelBooking(booking.id, reason || 'Customer requested cancellation');
+      if (!updated) throw new Error('This booking could not be cancelled.');
+      return updated;
+    }
+    const { data, error } = await supabase.rpc('cancel_website_booking', {
+      p_booking_reference: reference.trim().toUpperCase(),
+      p_customer_phone: phone.trim(),
+      p_reason: reason || 'Customer requested cancellation',
+    });
+    const result = data as { ok?: boolean; message?: string; booking?: Booking } | null;
+    if (error) {
+      console.error('Booking cancellation failed:', error.message);
+      throw new Error('We could not cancel this booking right now. Please try again or contact support.');
+    }
+    if (!result?.ok || !result.booking) {
+      throw new Error(result?.message || 'This booking could not be cancelled online.');
+    }
+    const booking = result.booking;
+    setStored<Booking[]>(STORAGE_KEYS.BOOKINGS, [booking, ...this.getBookings().filter((item) => item.id !== booking.id)]);
+    dispatchCatalogUpdated();
+    return booking;
+  },
+
+  async rescheduleOnlineBooking(
+    reference: string,
+    phone: string,
+    newStart: string,
+    newEnd: string
+  ): Promise<Booking> {
+    if (!supabase) {
+      const booking = this.getBookingByReference(reference);
+      if (!booking) throw new Error('Booking not found. Check the reference and phone number.');
+      const updated = this.rescheduleBooking(booking.id, newStart, newEnd, booking.customerName);
+      if (!updated) throw new Error('This booking could not be rescheduled.');
+      return updated;
+    }
+    const { data, error } = await supabase.rpc('reschedule_website_booking', {
+      p_booking_reference: reference.trim().toUpperCase(),
+      p_customer_phone: phone.trim(),
+      p_new_start: newStart,
+      p_new_end: newEnd,
+    });
+    const result = data as { ok?: boolean; message?: string; booking?: Booking } | null;
+    if (error) {
+      console.error('Booking reschedule failed:', error.message);
+      throw new Error('We could not reschedule this booking right now. Please try again or contact support.');
+    }
+    if (!result?.ok || !result.booking) {
+      throw new Error(result?.message || 'This booking could not be rescheduled online.');
+    }
+    const booking = result.booking;
+    setStored<Booking[]>(STORAGE_KEYS.BOOKINGS, [booking, ...this.getBookings().filter((item) => item.id !== booking.id)]);
+    dispatchCatalogUpdated();
+    return booking;
+  },
+
+  // The database validates service eligibility, booking hours, consent, and overlapping requests
+  // in one transaction. Photos are uploaded only to a private, staff-readable storage bucket.
   async createOnlineBooking(
-    data: Omit<Booking, 'id' | 'customerId' | 'bookingReference' | 'status' | 'createdAt' | 'updatedAt' | 'history' | 'attachments'>
+    data: Omit<Booking, 'id' | 'customerId' | 'bookingReference' | 'status' | 'createdAt' | 'updatedAt' | 'history' | 'attachments'>,
+    photos: string[] = []
   ): Promise<Booking> {
     if (!supabase) throw new Error('Online booking is temporarily unavailable. Please call our service desk.');
+    if (photos.length > 5) throw new Error('Please attach no more than five photos.');
 
-    const customerId = crypto.randomUUID();
-    const bookingId = crypto.randomUUID();
-    const now = new Date().toISOString();
-    const datePart = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Karachi',
-      year: '2-digit',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(new Date()).replace(/\D/g, '');
-    const reference = `ABC-${datePart}-${crypto.randomUUID().replace(/-/g, '').slice(0, 6).toUpperCase()}`;
-
-    const { error: customerError } = await supabase.from('customers').insert({
-      id: customerId,
-      full_name: data.customerName,
-      phone_e164: data.customerPhone,
-      email: data.customerEmail || null,
-      preferred_language: data.language,
-      created_via: 'website',
-    });
-    if (customerError) {
-      console.error('Supabase customer insert failed:', customerError.message);
-      throw new Error('We could not save your booking details. Please try again or call our service desk.');
+    const preparedPhotos: { blob: Blob; extension: string; fileName: string }[] = [];
+    for (let index = 0; index < photos.length; index += 1) {
+      const response = await fetch(photos[index]);
+      const blob = await response.blob();
+      const extensionByType: Record<string, string> = {
+        'image/jpeg': 'jpg',
+        'image/png': 'png',
+        'image/webp': 'webp',
+      };
+      const extension = extensionByType[blob.type];
+      if (!extension) throw new Error('Photos must be JPEG, PNG, or WebP images.');
+      if (blob.size <= 0 || blob.size > 5 * 1024 * 1024) {
+        throw new Error('Each photo must be smaller than 5 MB.');
+      }
+      preparedPhotos.push({
+        blob,
+        extension,
+        fileName: `photo_${index + 1}.${extension}`,
+      });
     }
 
-    const { error: bookingError } = await supabase.from('bookings').insert({
-      id: bookingId,
-      booking_reference: reference,
-      customer_id: customerId,
-      service_id: data.serviceId,
-      service_name_en: data.serviceNameEn,
-      service_name_ur: data.serviceNameUr,
-      customer_name: data.customerName,
-      customer_phone: data.customerPhone,
-      customer_email: data.customerEmail || null,
-      problem_description: data.problemDescription,
-      address_line: data.addressLine,
-      city: data.city,
-      area_name: data.areaName,
-      postal_code: data.postalCode || null,
-      scheduled_start: data.scheduledStart,
-      scheduled_end: data.scheduledEnd,
-      status: 'pending',
-      urgency: data.urgency,
-      estimated_amount: data.estimatedAmount ?? null,
-      customer_notes: data.customerNotes || null,
-      language: data.language,
-      source: 'website',
-      privacy_accepted_at: data.privacyAcceptedAt,
-      terms_accepted_at: data.termsAcceptedAt,
+    const { data: responseData, error } = await supabase.rpc('create_website_booking', {
+      p_service_id: data.serviceId,
+      p_customer_name: data.customerName.trim(),
+      p_customer_phone: data.customerPhone,
+      p_customer_email: data.customerEmail || null,
+      p_problem_description: data.problemDescription.trim(),
+      p_address_line: data.addressLine.trim(),
+      p_city: data.city,
+      p_area_name: data.areaName,
+      p_postal_code: data.postalCode || null,
+      p_scheduled_start: data.scheduledStart,
+      p_scheduled_end: data.scheduledEnd,
+      p_urgency: data.urgency,
+      p_language: data.language,
+      p_privacy_accepted_at: data.privacyAcceptedAt,
+      p_terms_accepted_at: data.termsAcceptedAt,
     });
-    if (bookingError) {
-      console.error('Supabase booking insert failed:', bookingError.message);
-      throw new Error('We could not confirm the booking in our system. Please contact our service desk before submitting again.');
+
+    if (error) {
+      console.error('Supabase booking RPC failed:', error.message);
+      if (error.message.includes('SLOT_UNAVAILABLE')) {
+        throw new Error('That appointment slot is no longer available. Please choose another time.');
+      }
+      if (error.message.includes('SERVICE_AREA_UNAVAILABLE')) {
+        throw new Error('This service area is not currently available. Please contact our service desk.');
+      }
+      if (error.message.includes('SERVICE_UNAVAILABLE')) {
+        throw new Error('This service is not currently bookable. Please select another service.');
+      }
+      throw new Error('We could not save your booking. Please check the details and try again.');
+    }
+    if (!responseData || typeof responseData !== 'object') {
+      throw new Error('The booking service returned an invalid response. Please contact support before retrying.');
     }
 
-    const booking: Booking = {
-      ...data,
-      id: bookingId,
-      customerId,
-      bookingReference: reference,
-      status: 'pending',
-      createdAt: now,
-      updatedAt: now,
-      history: [{
-        id: crypto.randomUUID(),
-        bookingId,
-        oldStatus: null,
-        newStatus: 'pending',
-        changedBy: data.customerName,
-        changedByType: 'customer',
-        note: 'Website booking request submitted',
-        createdAt: now,
-      }],
+    let booking = responseData as Booking;
+    const uploaded: BookingAttachment[] = [];
+    let uploadFailed = false;
+
+    for (const photo of preparedPhotos) {
+      const path = `${booking.id}/${crypto.randomUUID()}.${photo.extension}`;
+      const { error: uploadError } = await supabase.storage
+        .from('booking-attachments')
+        .upload(path, photo.blob, { contentType: photo.blob.type, upsert: false });
+      if (uploadError) {
+        uploadFailed = true;
+        console.warn('Booking photo upload failed:', uploadError.message);
+        continue;
+      }
+
+      const attachmentId = crypto.randomUUID();
+      const { error: attachmentError } = await supabase.from('booking_attachments').insert({
+        id: attachmentId,
+        booking_id: booking.id,
+        file_name: photo.fileName,
+        storage_path: path,
+        file_size: photo.blob.size,
+        file_type: photo.blob.type,
+      });
+      if (attachmentError) {
+        uploadFailed = true;
+        console.warn('Booking attachment metadata insert failed:', attachmentError.message);
+        continue;
+      }
+      uploaded.push({
+        id: attachmentId,
+        bookingId: booking.id,
+        fileName: photo.fileName,
+        fileUrl: path,
+        fileSize: photo.blob.size,
+        fileType: photo.blob.type,
+      });
+    }
+
+    booking = {
+      ...booking,
+      attachments: uploaded,
+      attachmentsUploadWarning: uploadFailed,
     };
-    setStored<Booking[]>(STORAGE_KEYS.BOOKINGS, [booking, ...this.getBookings()]);
+    setStored<Booking[]>(STORAGE_KEYS.BOOKINGS, [booking, ...this.getBookings().filter((item) => item.id !== booking.id)]);
     dispatchCatalogUpdated();
     return booking;
   },
