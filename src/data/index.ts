@@ -98,6 +98,42 @@ function dispatchCatalogUpdated(): void {
   }
 }
 
+async function recordRemoteAuditLog(
+  actorName: string,
+  action: string,
+  entityType: string,
+  entityId: string,
+  details: string
+): Promise<void> {
+  if (!supabase) return;
+  try {
+    const { data: userResult } = await supabase.auth.getUser();
+    const userId = userResult.user?.id;
+    if (!userId) return;
+
+    const { data: staffProfile, error: staffError } = await supabase
+      .from('staff_profiles')
+      .select('id, role')
+      .eq('auth_user_id', userId)
+      .eq('is_active', true)
+      .maybeSingle();
+    if (staffError || !staffProfile) return;
+
+    const { error } = await supabase.from('audit_logs').insert({
+      actor_staff_id: staffProfile.id,
+      actor_name: actorName,
+      actor_role: staffProfile.role,
+      action,
+      entity_type: entityType,
+      entity_id: entityId,
+      details: details.slice(0, 2000),
+    });
+    if (error) console.warn('Remote audit log could not be saved:', error.message);
+  } catch (error) {
+    console.warn('Remote audit logging failed:', error);
+  }
+}
+
 export const repository = {
   // Settings
   getSettings(): BusinessSettings {
@@ -138,6 +174,229 @@ export const repository = {
   getServiceById(id: string): Service | undefined {
     return this.getServices().find((s) => s.id === id);
   },
+  async updateOnlineBookingStatus(
+    bookingId: string,
+    newStatus: BookingStatus,
+    note?: string,
+    actorName = 'Staff'
+  ): Promise<Booking> {
+    if (!supabase) {
+      const local = this.updateBookingStatus(bookingId, newStatus, note, actorName, 'staff');
+      if (!local) throw new Error('Booking not found.');
+      return local;
+    }
+
+    const { data, error } = await supabase.rpc('update_staff_booking_status', {
+      p_booking_id: bookingId,
+      p_new_status: newStatus,
+      p_note: note || `Status changed to ${newStatus}`,
+    });
+    if (error || !data) {
+      console.error('Staff booking status update failed:', error?.message);
+      throw new Error(error?.message?.includes('NOT_AUTHORIZED')
+        ? 'Your staff role cannot make this booking change.'
+        : 'Booking status could not be updated. Refresh and try again.');
+    }
+
+    await recordRemoteAuditLog(actorName, 'BOOKING_STATUS_CHANGED', 'booking', bookingId, note || `Status changed to ${newStatus}`);
+    await this.initializeRemoteAdminData();
+    return data as Booking;
+  },
+
+  async assignOnlineTechnician(
+    bookingId: string,
+    technicianId: string,
+    actorName = 'Staff'
+  ): Promise<Booking> {
+    if (!supabase) {
+      const local = this.assignTechnician(bookingId, technicianId, actorName);
+      if (!local) throw new Error('Booking not found.');
+      return local;
+    }
+    const technician = this.getStaff().find((staff) => staff.id === technicianId);
+    if (!technician) throw new Error('Select an active technician.');
+
+    const { data, error } = await supabase
+      .from('bookings')
+      .update({
+        assigned_technician_id: technicianId,
+        assigned_technician_name: technician.fullName,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', bookingId)
+      .select('*')
+      .maybeSingle();
+    if (error || !data) {
+      console.error('Technician assignment failed:', error?.message);
+      throw new Error('Technician could not be assigned. Check your staff role and try again.');
+    }
+    await recordRemoteAuditLog(actorName, 'TECHNICIAN_ASSIGNED', 'booking', bookingId, `Assigned to ${technician.fullName}`);
+    await this.initializeRemoteAdminData();
+    const updated = this.getBookings().find((booking) => booking.id === bookingId);
+    return updated || toCamelRecord<Booking>(data);
+  },
+
+  async addOnlineInternalNote(
+    bookingId: string,
+    note: string,
+    actorName = 'Staff'
+  ): Promise<Booking> {
+    if (!supabase) {
+      const local = this.addInternalNote(bookingId, note, actorName);
+      if (!local) throw new Error('Booking not found.');
+      return local;
+    }
+    const current = this.getBookings().find((booking) => booking.id === bookingId);
+    if (!current) throw new Error('Booking not found. Refresh the booking list and try again.');
+    const existing = current.internalNotes ? `${current.internalNotes}\n` : '';
+    const internalNotes = `${existing}[${new Date().toISOString()} ${actorName}]: ${note.trim()}`;
+    const { data, error } = await supabase
+      .from('bookings')
+      .update({ internal_notes: internalNotes, updated_at: new Date().toISOString() })
+      .eq('id', bookingId)
+      .select('*')
+      .maybeSingle();
+    if (error || !data) {
+      console.error('Internal booking note failed:', error?.message);
+      throw new Error('The internal note could not be saved.');
+    }
+    await recordRemoteAuditLog(actorName, 'BOOKING_NOTE_ADDED', 'booking', bookingId, note.trim());
+    await this.initializeRemoteAdminData();
+    const updated = this.getBookings().find((booking) => booking.id === bookingId);
+    return updated || toCamelRecord<Booking>(data);
+  },
+
+  async updateOnlineInquiryStatus(
+    id: string,
+    status: 'new' | 'in_progress' | 'handled',
+    actorName = 'Staff'
+  ): Promise<CustomerInquiry> {
+    if (!supabase) {
+      const local = this.updateInquiryStatus(id, status, actorName);
+      if (!local) throw new Error('Inquiry not found.');
+      return local;
+    }
+    const { data, error } = await supabase
+      .from('customer_inquiries')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select('*')
+      .maybeSingle();
+    if (error || !data) {
+      console.error('Inquiry status update failed:', error?.message);
+      throw new Error('The inquiry status could not be saved.');
+    }
+    await recordRemoteAuditLog(actorName, 'INQUIRY_STATUS_CHANGED', 'customer_inquiry', id, `Inquiry set to ${status}`);
+    await this.initializeRemoteAdminData();
+    return toCamelRecord<CustomerInquiry>(data);
+  },
+
+  async updateOnlineBusinessSettings(
+    settings: Partial<BusinessSettings>,
+    actorName = 'Owner'
+  ): Promise<BusinessSettings> {
+    if (!supabase) return this.updateSettings(settings, actorName);
+    const columnMap: Record<string, string> = {
+      name: 'name',
+      phone: 'phone',
+      phoneDisplay: 'phone_display',
+      whatsapp: 'whatsapp',
+      phonePlaceholder: 'phone_placeholder',
+      phoneDial: 'phone_dial',
+      whatsappPlaceholder: 'whatsapp_placeholder',
+      whatsappNumber: 'whatsapp_number',
+      email: 'email',
+      addressEn: 'address_en',
+      addressUr: 'address_ur',
+      city: 'city',
+      operatingHoursEn: 'operating_hours_en',
+      operatingHoursUr: 'operating_hours_ur',
+      slotIntervalMinutes: 'slot_interval_minutes',
+      bufferMinutes: 'buffer_minutes',
+      minNoticeHours: 'min_notice_hours',
+      maxAdvanceDays: 'max_advance_days',
+      cancellationWindowHours: 'cancellation_window_hours',
+      emergencyUrgencyEnabled: 'emergency_urgency_enabled',
+      taxRatePercent: 'tax_rate_percent',
+      pricingPublicDisplay: 'pricing_public_display',
+      inspectionNoticeEn: 'inspection_notice_en',
+      inspectionNoticeUr: 'inspection_notice_ur',
+    };
+    const payload: Record<string, any> = {};
+    for (const [key, value] of Object.entries(settings)) {
+      if (Object.prototype.hasOwnProperty.call(columnMap, key)) payload[columnMap[key]] = value;
+    }
+    if (Object.keys(payload).length === 0) return this.getSettings();
+
+    const { data, error } = await supabase
+      .from('business_settings')
+      .update({ ...payload, updated_at: new Date().toISOString() })
+      .eq('id', true)
+      .select('*')
+      .maybeSingle();
+    if (error || !data) {
+      console.error('Business settings update failed:', error?.message);
+      throw new Error('Business settings could not be saved. Only the owner role can change them.');
+    }
+    const updated = toCamelRecord<BusinessSettings>(data);
+    setStored<BusinessSettings>(STORAGE_KEYS.SETTINGS, updated);
+    await recordRemoteAuditLog(actorName, 'SETTINGS_UPDATED', 'settings', 'business_settings', 'Updated public business configuration');
+    await this.initializeRemoteCatalog();
+    return updated;
+  },
+
+  async updateOnlineDataRequestStatus(
+    id: string,
+    status: 'open' | 'approved' | 'completed' | 'rejected',
+    actorName = 'Owner'
+  ): Promise<boolean> {
+    if (!supabase) return this.updateDataRequestStatus(id, status, actorName);
+    const { error } = await supabase
+      .from('data_requests')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) {
+      console.error('Data request status update failed:', error.message);
+      throw new Error('The privacy request status could not be saved.');
+    }
+    await recordRemoteAuditLog(actorName, 'DATA_REQUEST_STATUS', 'data_request', id, `Updated to ${status}`);
+    await this.initializeRemoteAdminData();
+    return true;
+  },
+
+  async createOnlineAvailabilityBlock(
+    block: Omit<AvailabilityBlock, 'id' | 'createdAt'>,
+    actorName = 'Owner'
+  ): Promise<AvailabilityBlock> {
+    if (!supabase) return this.createAvailabilityBlock(block, actorName);
+    const { data, error } = await supabase.from('availability_blocks').insert({
+      technician_id: block.technicianId || null,
+      starts_at: block.startsAt,
+      ends_at: block.endsAt,
+      block_type: block.blockType,
+      reason: block.reason.trim(),
+    }).select('*').single();
+    if (error || !data) {
+      console.error('Availability block creation failed:', error?.message);
+      throw new Error('The time-off block could not be saved. The owner role is required.');
+    }
+    await recordRemoteAuditLog(actorName, 'AVAILABILITY_BLOCK_CREATED', 'availability_block', data.id, block.reason);
+    await this.initializeRemoteAdminData();
+    return toCamelRecord<AvailabilityBlock>(data);
+  },
+
+  async deleteOnlineAvailabilityBlock(id: string, actorName = 'Owner'): Promise<boolean> {
+    if (!supabase) return this.deleteAvailabilityBlock(id, actorName);
+    const { error } = await supabase.from('availability_blocks').delete().eq('id', id);
+    if (error) {
+      console.error('Availability block deletion failed:', error.message);
+      throw new Error('The time-off block could not be deleted. The owner role is required.');
+    }
+    await recordRemoteAuditLog(actorName, 'AVAILABILITY_BLOCK_DELETED', 'availability_block', id, 'Deleted availability block');
+    await this.initializeRemoteAdminData();
+    return true;
+  },
+
   async saveOnlineService(service: Service, actorName = 'Admin'): Promise<Service> {
     if (!supabase) {
       return this.saveService(service, actorName);
@@ -194,7 +453,7 @@ export const repository = {
       this.initializeRemoteCatalog(),
       this.initializeRemoteAdminData(),
     ]);
-    this.addAuditLog(actorName, 'content_editor', 'SERVICE_SAVED', 'service', service.id, `Saved service: ${service.nameEn}`);
+    await recordRemoteAuditLog(actorName, 'SERVICE_SAVED', 'service', service.id, `Saved service: ${service.nameEn}`);
     return service;
   },
 
@@ -671,7 +930,7 @@ export const repository = {
       this.initializeRemoteCatalog(),
       this.initializeRemoteAdminData(),
     ]);
-    this.addAuditLog(actorName, 'content_editor', 'REVIEW_MODERATED', 'review', reviewId, `Review marked as ${status}`);
+    await recordRemoteAuditLog(actorName, 'REVIEW_MODERATED', 'review', reviewId, `Review marked as ${status}`);
     return true;
   },
 
