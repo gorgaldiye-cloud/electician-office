@@ -23,20 +23,36 @@ export const AdminInquiries: React.FC<AdminInquiriesProps> = ({ onNavigateTab })
 
   const [inquiries, setInquiries] = useState<CustomerInquiry[]>(() => repository.getInquiries());
   const [filter, setFilter] = useState<'all' | 'new' | 'in_progress' | 'handled'>('all');
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const refresh = () => {
     setInquiries(repository.getInquiries());
   };
 
-  const handleStatusChange = (id: string, status: 'new' | 'in_progress' | 'handled') => {
-    repository.updateInquiryStatus(id, status, currentStaff.fullName);
-    refresh();
+  const handleStatusChange = async (id: string, status: 'new' | 'in_progress' | 'handled') => {
+    if (busyId) return;
+    setBusyId(id);
+    setActionError(null);
+    try {
+      await repository.updateOnlineInquiryStatus(id, status, currentStaff.fullName);
+      refresh();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Inquiry status could not be saved.');
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const filtered = inquiries.filter((inq) => (filter === 'all' ? true : inq.status === filter));
 
   return (
     <div className="space-y-6">
+      {actionError && (
+        <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {actionError}
+        </p>
+      )}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="font-display font-extrabold text-2xl text-[#15191F]">
@@ -128,7 +144,7 @@ export const AdminInquiries: React.FC<AdminInquiriesProps> = ({ onNavigateTab })
                 <div className="flex items-center gap-2">
                   {inq.status !== 'handled' && (
                     <button
-                      onClick={() => handleStatusChange(inq.id, 'handled')}
+                      onClick={() => { void handleStatusChange(inq.id, 'handled'); }}
                       className="px-3 py-1 rounded-lg text-xs font-bold bg-[#1E8E5A] text-white hover:bg-[#167046] transition-colors"
                     >
                       Mark as Handled
@@ -136,7 +152,7 @@ export const AdminInquiries: React.FC<AdminInquiriesProps> = ({ onNavigateTab })
                   )}
                   {inq.status === 'new' && (
                     <button
-                      onClick={() => handleStatusChange(inq.id, 'in_progress')}
+                      onClick={() => { void handleStatusChange(inq.id, 'in_progress'); }}
                       className="px-3 py-1 rounded-lg text-xs font-semibold bg-[#EEF1F4] text-[#15191F] hover:bg-[#D5DBE1]"
                     >
                       In Progress
