@@ -67,16 +67,35 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ initialServiceId, 
   const selectedService = services.find((s) => s.id === selectedServiceId) || services[0];
   const selectedArea = areas.find((a) => a.id === selectedAreaId) || areas[0];
 
-  // Available slots for selected date
-  const availableSlots = repository.getAvailableSlots(selectedDate, selectedServiceId);
+  // Availability comes from Supabase so other customers' bookings are respected.
+  const [availableSlots, setAvailableSlots] = useState<{ time: string; start: string; end: string; available: boolean }[]>([]);
+  const [isLoadingSlots, setIsLoadingSlots] = useState(false);
 
-  // Auto-select first available slot if not selected or current slot not available
   useEffect(() => {
-    const firstAvail = availableSlots.find((s) => s.available);
-    if (firstAvail && !selectedSlot) {
-      setSelectedSlot(firstAvail.time);
-    }
-  }, [selectedDate, availableSlots, selectedSlot]);
+    let active = true;
+    setIsLoadingSlots(true);
+    setAvailableSlots([]);
+    void repository.getOnlineAvailableSlots(selectedDate, selectedServiceId)
+      .then((slots) => {
+        if (!active) return;
+        setAvailableSlots(slots);
+        setSelectedSlot((current) =>
+          current && slots.some((slot) => slot.time === current && slot.available)
+            ? current
+            : (slots.find((slot) => slot.available)?.time || '')
+        );
+      })
+      .catch((error) => {
+        if (!active) return;
+        setAvailableSlots([]);
+        setSelectedSlot('');
+        setErrorMessage(error instanceof Error ? error.message : 'Appointment times are temporarily unavailable.');
+      })
+      .finally(() => {
+        if (active) setIsLoadingSlots(false);
+      });
+    return () => { active = false; };
+  }, [selectedDate, selectedServiceId]);
 
   // Quick hazard check
   const hasHazardKeywords = /(spark|smoke|fire|burning|blast|dhuan|aag|jalne|shola|dhamaka)/i.test(
@@ -217,7 +236,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ initialServiceId, 
         source: 'website',
         privacyAcceptedAt: new Date().toISOString(),
         termsAcceptedAt: new Date().toISOString(),
-      });
+      }, photos);
 
       // The reference is shown only after Supabase confirms the insert succeeded.
       setSubmittedBooking(newBooking);
@@ -260,6 +279,13 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ initialServiceId, 
             <p className="text-sm text-[#5B6572] mt-2 max-w-md">
               {t.booking.successMsg}
             </p>
+            {submittedBooking.attachmentsUploadWarning && (
+              <p role="status" className="mt-3 max-w-md rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-900">
+                {language === 'ur'
+                  ? 'بکنگ محفوظ ہو گئی ہے، لیکن ایک یا زیادہ تصاویر اپ لوڈ نہیں ہو سکیں۔ براہِ کرم فون پر تصاویر فراہم کریں۔'
+                  : 'Your booking was saved, but one or more photos could not be uploaded. Please share those photos with our service desk.'}
+              </p>
+            )}
 
             {/* Reference Highlight Box */}
             <div className="my-6 p-4 rounded-xl bg-[#EEF1F4] border border-[#D5DBE1] w-full max-w-md flex flex-col items-center gap-2">
@@ -684,6 +710,11 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ initialServiceId, 
                   {t.booking.timeSlotLabel} (Asia/Karachi PKT)
                 </label>
 
+                {isLoadingSlots && (
+                  <p className="mb-3 text-xs text-[#5B6572]">
+                    {language === 'ur' ? 'دستیاب اوقات چیک ہو رہے ہیں…' : 'Checking live availability…'}
+                  </p>
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {availableSlots.map((slot, idx) => (
                     <button
