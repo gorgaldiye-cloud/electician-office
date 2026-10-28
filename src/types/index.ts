@@ -133,6 +133,7 @@ export interface Booking {
   updatedAt: string;
   history: BookingStatusHistory[];
   attachments?: BookingAttachment[];
+  attachmentsUploadWarning?: boolean;
 }
 
 export interface Staff {
