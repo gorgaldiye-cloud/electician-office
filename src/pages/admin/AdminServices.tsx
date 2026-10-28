@@ -9,20 +9,30 @@ export const AdminServices: React.FC = () => {
   const { language, t, formatMoney } = useLanguage();
   const { currentStaff } = useAuth();
 
-  const [services, setServices] = useState<Service[]>(() => repository.getServices());
+  const [services, setServices] = useState<Service[]>(() => repository.getAdminServices());
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [editingService, setEditingService] = useState<Service | null>(null);
 
   const refresh = () => {
-    setServices(repository.getServices());
+    setServices(repository.getAdminServices());
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingService) return;
+    if (!editingService || isSaving) return;
 
-    repository.saveService(editingService, currentStaff.fullName);
-    setEditingService(null);
-    refresh();
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      await repository.saveOnlineService(editingService, currentStaff.fullName);
+      setEditingService(null);
+      refresh();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Service could not be saved. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -111,6 +121,11 @@ export const AdminServices: React.FC = () => {
             </div>
 
             <form onSubmit={handleSave} className="space-y-4">
+              {saveError && (
+                <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
+                  {saveError}
+                </p>
+              )}
               <div>
                 <label className="text-xs font-semibold text-[#15191F] block mb-1">
                   Service Name (English)
@@ -223,9 +238,10 @@ export const AdminServices: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-lg text-xs font-bold bg-[#15191F] text-[#FFC928]"
+                  disabled={isSaving}
+                  className="px-5 py-2 rounded-lg text-xs font-bold bg-[#15191F] text-[#FFC928] disabled:opacity-60 disabled:cursor-wait"
                 >
-                  {t.common.save}
+                  {isSaving ? (language === 'ur' ? 'محفوظ ہو رہا ہے…' : 'Saving…') : t.common.save}
                 </button>
               </div>
             </form>
