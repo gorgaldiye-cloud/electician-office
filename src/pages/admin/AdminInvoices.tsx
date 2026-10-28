@@ -21,6 +21,8 @@ export const AdminInvoices: React.FC = () => {
 
   const [invoices, setInvoices] = useState<Invoice[]>(() => repository.getInvoices());
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Create Modal
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -52,9 +54,9 @@ export const AdminInvoices: React.FC = () => {
     setItems((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleCreateInvoice = (e: React.FormEvent) => {
+  const handleCreateInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customerName) return;
+    if (!customerName.trim() || !customerPhone.trim() || isSaving) return;
 
     const invoiceItems: InvoiceItem[] = items.map((it, idx) => ({
       id: `item-${Date.now()}-${idx}`,
@@ -64,64 +66,87 @@ export const AdminInvoices: React.FC = () => {
       unitPrice: it.price,
       lineTotal: it.qty * it.price,
     }));
-
     const subtotal = invoiceItems.reduce((acc, it) => acc + it.lineTotal, 0);
 
-    repository.createInvoice(
-      {
-        customerId: `cust-${Date.now()}`,
-        customerName,
-        customerPhone,
-        customerAddress,
-        status: 'issued',
-        subtotal,
-        discount: 0,
-        taxRate: 0,
-        taxAmount: 0,
-        total: subtotal,
-        amountPaid: 0,
-        issueDate: new Date().toISOString().split('T')[0],
-        dueDate: new Date().toISOString().split('T')[0],
-        items: invoiceItems,
-        payments: [],
-      },
-      currentStaff.fullName
-    );
+    setIsSaving(true);
+    setActionError(null);
+    try {
+      await repository.createOnlineInvoice(
+        {
+          customerId: '',
+          customerName: customerName.trim(),
+          customerPhone: customerPhone.trim(),
+          customerAddress: customerAddress.trim(),
+          status: 'issued',
+          subtotal,
+          discount: 0,
+          taxRate: 0,
+          taxAmount: 0,
+          total: subtotal,
+          amountPaid: 0,
+          issueDate: new Date().toISOString().split('T')[0],
+          dueDate: new Date().toISOString().split('T')[0],
+          items: invoiceItems,
+          payments: [],
+        },
+        currentStaff.fullName
+      );
 
-    refresh();
-    setShowCreateModal(false);
-    setCustomerName('');
-    setCustomerPhone('');
-    setCustomerAddress('');
+      refresh();
+      setShowCreateModal(false);
+      setCustomerName('');
+      setCustomerPhone('');
+      setCustomerAddress('');
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'The invoice could not be saved.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleRecordPayment = (e: React.FormEvent) => {
+  const handleRecordPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedInvoice) return;
+    if (!selectedInvoice || isSaving) return;
     const amountNum = parseFloat(paymentAmount) || 0;
-    if (amountNum <= 0) return;
+    if (amountNum <= 0) {
+      setActionError('Enter a payment amount greater than zero.');
+      return;
+    }
 
-    repository.recordPayment(
-      selectedInvoice.id,
-      {
-        invoiceId: selectedInvoice.id,
-        amount: amountNum,
-        method: paymentMethod,
-        recordedBy: currentStaff.fullName,
-        notes: paymentNotes,
-      },
-      currentStaff.fullName
-    );
+    setIsSaving(true);
+    setActionError(null);
+    try {
+      await repository.recordOnlinePayment(
+        selectedInvoice.id,
+        {
+          invoiceId: selectedInvoice.id,
+          amount: amountNum,
+          method: paymentMethod,
+          recordedBy: currentStaff.fullName,
+          notes: paymentNotes,
+        },
+        currentStaff.fullName
+      );
 
-    refresh();
-    setShowPaymentModal(false);
-    setSelectedInvoice(null);
-    setPaymentAmount('');
-    setPaymentNotes('');
+      refresh();
+      setShowPaymentModal(false);
+      setSelectedInvoice(null);
+      setPaymentAmount('');
+      setPaymentNotes('');
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Payment could not be recorded.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
     <div className="space-y-6">
+      {actionError && (
+        <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {actionError}
+        </p>
+      )}
       {/* Title & Create CTA */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -381,6 +406,7 @@ export const AdminInvoices: React.FC = () => {
                 </button>
                 <button
                   type="submit"
+                  disabled={isSaving}
                   className="px-5 py-2 rounded-lg text-xs font-bold bg-[#15191F] text-[#FFC928]"
                 >
                   Issue Invoice
@@ -455,6 +481,7 @@ export const AdminInvoices: React.FC = () => {
                 </button>
                 <button
                   type="submit"
+                  disabled={isSaving}
                   className="px-5 py-2 rounded-lg text-xs font-bold bg-[#1E8E5A] text-white"
                 >
                   Save Payment
