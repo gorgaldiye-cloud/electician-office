@@ -21,6 +21,7 @@ import { BookingWizard } from './pages/public/BookingWizard';
 import { TrackBookingPage } from './pages/public/TrackBookingPage';
 import { AIDiagnosticsPage } from './pages/public/AIDiagnosticsPage';
 import { LegalPage } from './pages/public/LegalPages';
+import { repository } from './data';
 
 // Admin Pages
 import { AdminDashboard } from './pages/admin/AdminDashboard';
@@ -53,6 +54,14 @@ export default function App() {
     return 'home';
   });
   const [viewParam, setViewParam] = useState<string | undefined>(undefined);
+  const [, setCatalogRevision] = useState(0);
+
+  useEffect(() => {
+    const refreshCatalog = () => setCatalogRevision((revision) => revision + 1);
+    window.addEventListener('abc:data-updated', refreshCatalog);
+    void repository.initializeRemoteCatalog();
+    return () => window.removeEventListener('abc:data-updated', refreshCatalog);
+  }, []);
 
   const handleNavigate = (view: string, param?: string) => {
     setCurrentView(view);
