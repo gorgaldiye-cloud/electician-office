@@ -111,7 +111,7 @@ export const repository = {
 
   // Services
   getServices(): Service[] {
-    const list = getStored<Service[]>(STORAGE_KEYS.SERVICES, initialServices);
+    const list = getStored<Service[]>(STORAGE_KEYS.SERVICES, isSupabaseConfigured ? [] : initialServices);
     // Enforce PRD v1.1 Decision 3: public pricing display mode is inspection_only
     return list.map((s) => ({
       ...s,
@@ -142,21 +142,21 @@ export const repository = {
 
   // Categories & Areas
   getCategories(): ServiceCategory[] {
-    return getStored<ServiceCategory[]>(STORAGE_KEYS.CATEGORIES, initialCategories);
+    return getStored<ServiceCategory[]>(STORAGE_KEYS.CATEGORIES, isSupabaseConfigured ? [] : initialCategories);
   },
   getServiceAreas(): ServiceArea[] {
-    return getStored<ServiceArea[]>(STORAGE_KEYS.AREAS, initialServiceAreas);
+    return getStored<ServiceArea[]>(STORAGE_KEYS.AREAS, isSupabaseConfigured ? [] : initialServiceAreas);
   },
 
   // Staff & Schedules
   getStaff(): Staff[] {
-    return getStored<Staff[]>(STORAGE_KEYS.STAFF, initialStaff);
+    return getStored<Staff[]>(STORAGE_KEYS.STAFF, isSupabaseConfigured ? [] : initialStaff);
   },
   getTechnicians(): Staff[] {
     return this.getStaff().filter((s) => s.role === 'technician' && s.isActive);
   },
   getStaffSchedules(): StaffSchedule[] {
-    return getStored<StaffSchedule[]>(STORAGE_KEYS.SCHEDULES, initialStaffSchedules);
+    return getStored<StaffSchedule[]>(STORAGE_KEYS.SCHEDULES, isSupabaseConfigured ? [] : initialStaffSchedules);
   },
   saveStaffSchedule(schedule: StaffSchedule, actorName = 'Admin'): StaffSchedule {
     const schedules = this.getStaffSchedules();
@@ -173,7 +173,7 @@ export const repository = {
     return schedule;
   },
   getAvailabilityBlocks(): AvailabilityBlock[] {
-    return getStored<AvailabilityBlock[]>(STORAGE_KEYS.BLOCKS, initialAvailabilityBlocks);
+    return getStored<AvailabilityBlock[]>(STORAGE_KEYS.BLOCKS, isSupabaseConfigured ? [] : initialAvailabilityBlocks);
   },
   createAvailabilityBlock(block: Omit<AvailabilityBlock, 'id' | 'createdAt'>, actorName = 'Admin'): AvailabilityBlock {
     const blocks = this.getAvailabilityBlocks();
@@ -386,7 +386,7 @@ export const repository = {
 
   // Quotes
   getQuotes(): Quote[] {
-    return getStored<Quote[]>(STORAGE_KEYS.QUOTES, initialQuotes);
+    return getStored<Quote[]>(STORAGE_KEYS.QUOTES, isSupabaseConfigured ? [] : initialQuotes);
   },
   getQuoteById(id: string): Quote | undefined {
     return this.getQuotes().find((q) => q.id === id);
@@ -467,7 +467,7 @@ export const repository = {
 
   // Invoices
   getInvoices(): Invoice[] {
-    return getStored<Invoice[]>(STORAGE_KEYS.INVOICES, initialInvoices);
+    return getStored<Invoice[]>(STORAGE_KEYS.INVOICES, isSupabaseConfigured ? [] : initialInvoices);
   },
   getInvoiceById(id: string): Invoice | undefined {
     return this.getInvoices().find((i) => i.id === id);
@@ -589,7 +589,7 @@ export const repository = {
 
   // Data Requests (Privacy & GDPR compliance)
   getDataRequests(): DataRequest[] {
-    return getStored<DataRequest[]>(STORAGE_KEYS.DATA_REQUESTS, initialDataRequests);
+    return getStored<DataRequest[]>(STORAGE_KEYS.DATA_REQUESTS, isSupabaseConfigured ? [] : initialDataRequests);
   },
   createDataRequest(req: Omit<DataRequest, 'id' | 'createdAt' | 'status'>, actorName = 'Customer'): DataRequest {
     const reqs = this.getDataRequests();
@@ -616,7 +616,7 @@ export const repository = {
 
   // Audit Logs
   getAuditLogs(): AuditLog[] {
-    return getStored<AuditLog[]>(STORAGE_KEYS.AUDIT, initialAuditLogs);
+    return getStored<AuditLog[]>(STORAGE_KEYS.AUDIT, isSupabaseConfigured ? [] : initialAuditLogs);
   },
   addAuditLog(actorName: string, actorRole: any, action: string, entityType: string, entityId: string, details: string) {
     const logs = this.getAuditLogs();
