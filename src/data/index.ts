@@ -138,6 +138,66 @@ export const repository = {
   getServiceById(id: string): Service | undefined {
     return this.getServices().find((s) => s.id === id);
   },
+  async saveOnlineService(service: Service, actorName = 'Admin'): Promise<Service> {
+    if (!supabase) {
+      return this.saveService(service, actorName);
+    }
+
+    const payload = {
+      id: service.id,
+      category_id: service.categoryId,
+      slug: service.slug,
+      name_en: service.nameEn,
+      name_ur: service.nameUr,
+      short_description_en: service.shortDescriptionEn,
+      short_description_ur: service.shortDescriptionUr,
+      description_en: service.descriptionEn,
+      description_ur: service.descriptionUr,
+      pricing_type: 'inspection_required',
+      base_price: null,
+      estimated_duration_minutes: service.estimatedDurationMinutes,
+      buffer_minutes: service.bufferMinutes,
+      is_bookable: service.isBookable,
+      is_active: service.isActive,
+      sort_order: service.sortOrder,
+      image_path: service.imagePath,
+      icon_name: service.iconName,
+      included_en: service.includedEn,
+      included_ur: service.includedUr,
+      process_en: service.processEn,
+      process_ur: service.processUr,
+      seo_title_en: service.seoTitleEn || null,
+      seo_title_ur: service.seoTitleUr || null,
+    };
+
+    const { data: existing, error: updateError } = await supabase
+      .from('services')
+      .update(payload)
+      .eq('id', service.id)
+      .select('id')
+      .maybeSingle();
+
+    if (updateError) {
+      console.error('Service update failed:', updateError.message);
+      throw new Error('Service could not be saved. Check your staff role and try again.');
+    }
+
+    if (!existing) {
+      const { error: insertError } = await supabase.from('services').insert(payload);
+      if (insertError) {
+        console.error('Service creation failed:', insertError.message);
+        throw new Error('Service could not be created. Check its category and slug, then try again.');
+      }
+    }
+
+    await Promise.all([
+      this.initializeRemoteCatalog(),
+      this.initializeRemoteAdminData(),
+    ]);
+    this.addAuditLog(actorName, 'content_editor', 'SERVICE_SAVED', 'service', service.id, `Saved service: ${service.nameEn}`);
+    return service;
+  },
+
   saveService(service: Service, actorName = 'Admin'): Service {
     const services = this.getServices();
     const index = services.findIndex((s) => s.id === service.id);
@@ -592,6 +652,29 @@ export const repository = {
     setStored(STORAGE_KEYS.REVIEWS, [newReview, ...reviews]);
     return newReview;
   },
+  async moderateOnlineReview(
+    reviewId: string,
+    status: 'approved' | 'rejected',
+    actorName = 'Admin'
+  ): Promise<boolean> {
+    if (!supabase) return this.moderateReview(reviewId, status, actorName);
+
+    const { error } = await supabase
+      .from('reviews')
+      .update({ moderation_status: status })
+      .eq('id', reviewId);
+    if (error) {
+      console.error('Review moderation failed:', error.message);
+      throw new Error('Review moderation failed. Check your content-editor permissions and try again.');
+    }
+    await Promise.all([
+      this.initializeRemoteCatalog(),
+      this.initializeRemoteAdminData(),
+    ]);
+    this.addAuditLog(actorName, 'content_editor', 'REVIEW_MODERATED', 'review', reviewId, `Review marked as ${status}`);
+    return true;
+  },
+
   moderateReview(reviewId: string, status: 'approved' | 'rejected', actorName = 'Admin'): boolean {
     const reviews = getStored<Review[]>(STORAGE_KEYS.REVIEWS, initialReviews);
     const index = reviews.findIndex((r) => r.id === reviewId);
