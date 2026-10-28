@@ -38,6 +38,7 @@ import {
   initialDataRequests,
   initialAuditLogs,
 } from './mock/seedData';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 // Storage keys v2 (incorporates PRD v1.1 confirmed decisions)
 const STORAGE_KEYS = {
@@ -45,16 +46,19 @@ const STORAGE_KEYS = {
   SERVICES: 'abc_services_v2',
   CATEGORIES: 'abc_categories_v2',
   AREAS: 'abc_areas_v2',
-  STAFF: 'abc_staff_v2',
-  SCHEDULES: 'abc_schedules_v2',
-  BLOCKS: 'abc_blocks_v2',
-  BOOKINGS: 'abc_bookings_v2',
-  INVOICES: 'abc_invoices_v2',
-  QUOTES: 'abc_quotes_v2',
-  INQUIRIES: 'abc_inquiries_v2',
-  DATA_REQUESTS: 'abc_datareqs_v2',
-  AUDIT: 'abc_audit_v2',
-  REVIEWS: 'abc_reviews_v2',
+  STAFF: 'abc_staff_remote_v1',
+  SCHEDULES: 'abc_schedules_remote_v1',
+  BLOCKS: 'abc_blocks_remote_v1',
+  BOOKINGS: 'abc_bookings_remote_v1',
+  INVOICES: 'abc_invoices_remote_v1',
+  QUOTES: 'abc_quotes_remote_v1',
+  INQUIRIES: 'abc_inquiries_remote_v1',
+  DATA_REQUESTS: 'abc_datareqs_remote_v1',
+  AUDIT: 'abc_audit_remote_v1',
+  REVIEWS: 'abc_reviews_remote_v1',
+  PROJECTS: 'abc_projects_remote_v1',
+  FAQS: 'abc_faqs_remote_v1',
+  BLOG_POSTS: 'abc_blog_posts_remote_v1',
 };
 
 function getStored<T>(key: string, fallback: T): T {
@@ -72,6 +76,23 @@ function setStored<T>(key: string, value: T): void {
     localStorage.setItem(key, JSON.stringify(value));
   } catch (e) {
     console.error('Failed to persist to localStorage', e);
+  }
+}
+
+
+type DatabaseRow = Record<string, any>;
+
+function toCamelRecord<T>(row: DatabaseRow): T {
+  const mapped: DatabaseRow = {};
+  for (const [key, value] of Object.entries(row)) {
+    mapped[key.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase())] = value;
+  }
+  return mapped as T;
+}
+
+function dispatchCatalogUpdated(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('abc:data-updated'));
   }
 }
 
@@ -176,7 +197,7 @@ export const repository = {
 
   // Bookings
   getBookings(): Booking[] {
-    return getStored<Booking[]>(STORAGE_KEYS.BOOKINGS, initialBookings);
+    return getStored<Booking[]>(STORAGE_KEYS.BOOKINGS, isSupabaseConfigured ? [] : initialBookings);
   },
   getBookingByReference(reference: string): Booking | undefined {
     const clean = reference.trim().toUpperCase();
@@ -499,18 +520,7 @@ export const repository = {
 
   // Inquiries
   getInquiries(): CustomerInquiry[] {
-    return getStored<CustomerInquiry[]>(STORAGE_KEYS.INQUIRIES, [
-      {
-        id: 'inq-1',
-        fullName: 'Omar Tariq',
-        phone: '+92 300 4455667',
-        email: 'omar@example.com',
-        subject: 'Commercial Clinic 3-Phase Connection Quotation',
-        message: 'We are opening a 4-room dental clinic in DHA Phase 6. We require high-power sterilization units and dedicated sub-meters. Please send an estimation.',
-        status: 'new',
-        createdAt: new Date(Date.now() - 4800000).toISOString(),
-      },
-    ]);
+    return getStored<CustomerInquiry[]>(STORAGE_KEYS.INQUIRIES, isSupabaseConfigured ? [] : initialInquiries);
   },
   createInquiry(inquiry: Omit<CustomerInquiry, 'id' | 'createdAt' | 'status'>): CustomerInquiry {
     const inquiries = this.getInquiries();
@@ -538,30 +548,30 @@ export const repository = {
     return updated;
   },
 
-  // Projects, FAQs, Reviews, Blogs
+  // Public content is cached from Supabase after app startup. When a configured database
+  // returns an empty table, keep the real empty state rather than showing demo records.
   getProjects(): Project[] {
-    return initialProjects;
+    return getStored<Project[]>(STORAGE_KEYS.PROJECTS, isSupabaseConfigured ? [] : initialProjects);
   },
   getFAQs(): FAQ[] {
-    return initialFAQs;
+    return getStored<FAQ[]>(STORAGE_KEYS.FAQS, isSupabaseConfigured ? [] : initialFAQs);
   },
   getReviews(includeUnmoderated = false): Review[] {
-    const revs = getStored<Review[]>(STORAGE_KEYS.REVIEWS, initialReviews);
+    const revs = getStored<Review[]>(STORAGE_KEYS.REVIEWS, isSupabaseConfigured ? [] : initialReviews);
     if (includeUnmoderated) return revs;
     return revs.filter((r) => r.moderationStatus === 'approved');
   },
   addReview(review: Omit<Review, 'id' | 'date' | 'isVerified' | 'moderationStatus'>): Review {
-    const reviews = getStored<Review[]>(STORAGE_KEYS.REVIEWS, initialReviews);
-    const newRev: Review = {
+    const reviews = getStored<Review[]>(STORAGE_KEYS.REVIEWS, isSupabaseConfigured ? [] : initialReviews);
+    const newReview: Review = {
       ...review,
       id: `rev-${Date.now()}`,
       date: new Date().toISOString().split('T')[0],
-      isVerified: true,
-      moderationStatus: 'approved', // Auto-approved for verified demo or set to pending
+      isVerified: false,
+      moderationStatus: 'pending',
     };
-    const updated = [newRev, ...reviews];
-    setStored(STORAGE_KEYS.REVIEWS, updated);
-    return newRev;
+    setStored(STORAGE_KEYS.REVIEWS, [newReview, ...reviews]);
+    return newReview;
   },
   moderateReview(reviewId: string, status: 'approved' | 'rejected', actorName = 'Admin'): boolean {
     const reviews = getStored<Review[]>(STORAGE_KEYS.REVIEWS, initialReviews);
@@ -574,7 +584,7 @@ export const repository = {
     return true;
   },
   getBlogPosts(): BlogPost[] {
-    return initialBlogPosts;
+    return getStored<BlogPost[]>(STORAGE_KEYS.BLOG_POSTS, isSupabaseConfigured ? [] : initialBlogPosts);
   },
 
   // Data Requests (Privacy & GDPR compliance)
@@ -621,6 +631,177 @@ export const repository = {
       timestamp: new Date().toISOString(),
     };
     setStored(STORAGE_KEYS.AUDIT, [newLog, ...logs.slice(0, 100)]);
+  },
+
+
+  // Load only publicly readable catalog rows. Each result has its own error handling so a
+  // failed optional section does not prevent other public content from refreshing.
+  async initializeRemoteCatalog(): Promise<void> {
+    if (!supabase) return;
+
+    try {
+      const [categories, services, areas, settings, faqs, blogs, projects, reviews] = await Promise.all([
+        supabase.from('service_categories').select('*').eq('is_active', true).order('sort_order'),
+        supabase.from('services').select('*').eq('is_active', true).order('sort_order'),
+        supabase.from('service_areas').select('*').eq('is_active', true).order('city').order('area'),
+        supabase.from('business_settings').select('*').eq('id', true).maybeSingle(),
+        supabase.from('faqs').select('*').eq('is_active', true).order('sort_order'),
+        supabase.from('blog_posts').select('*').eq('is_published', true).order('published_at', { ascending: false }),
+        supabase.from('projects').select('*').eq('is_published', true).order('published_at', { ascending: false }),
+        supabase.from('reviews').select('*').eq('moderation_status', 'approved').order('review_date', { ascending: false }),
+      ]);
+
+      const persistRows = <T,>(key: string, response: { data: any[] | null; error: any }): void => {
+        if (!response.error && Array.isArray(response.data)) {
+          setStored<T[]>(key, response.data.map((row) => toCamelRecord<T>(row)));
+        } else if (response.error) {
+          console.error('Unable to refresh public catalog section:', response.error.message);
+        }
+      };
+
+      persistRows<ServiceCategory>(STORAGE_KEYS.CATEGORIES, categories);
+      persistRows<Service>(STORAGE_KEYS.SERVICES, services);
+      persistRows<ServiceArea>(STORAGE_KEYS.AREAS, areas);
+      persistRows<FAQ>(STORAGE_KEYS.FAQS, faqs);
+      persistRows<BlogPost>(STORAGE_KEYS.BLOG_POSTS, blogs);
+      persistRows<Project>(STORAGE_KEYS.PROJECTS, projects);
+
+      if (!reviews.error && Array.isArray(reviews.data)) {
+        setStored<Review[]>(STORAGE_KEYS.REVIEWS, reviews.data.map((row) => ({
+          ...toCamelRecord<Review>(row),
+          date: row.review_date,
+          isVerified: Boolean(row.is_verified),
+          moderationStatus: row.moderation_status,
+        })));
+      } else if (reviews.error) {
+        console.error('Unable to refresh public reviews:', reviews.error.message);
+      }
+
+      if (!settings.error && settings.data) {
+        setStored<BusinessSettings>(STORAGE_KEYS.SETTINGS, toCamelRecord<BusinessSettings>(settings.data));
+      } else if (settings.error) {
+        console.error('Unable to refresh business settings:', settings.error.message);
+      }
+      dispatchCatalogUpdated();
+    } catch (error) {
+      console.error('Supabase public catalog refresh failed:', error);
+    }
+  },
+
+  // Store website bookings using the database's website-only INSERT policy. Anonymous clients
+  // intentionally cannot SELECT the resulting private customer or booking rows.
+  async createOnlineBooking(
+    data: Omit<Booking, 'id' | 'customerId' | 'bookingReference' | 'status' | 'createdAt' | 'updatedAt' | 'history' | 'attachments'>
+  ): Promise<Booking> {
+    if (!supabase) throw new Error('Online booking is temporarily unavailable. Please call our service desk.');
+
+    const customerId = crypto.randomUUID();
+    const bookingId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const datePart = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Karachi',
+      year: '2-digit',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date()).replace(/\D/g, '');
+    const reference = `ABC-${datePart}-${crypto.randomUUID().replace(/-/g, '').slice(0, 6).toUpperCase()}`;
+
+    const { error: customerError } = await supabase.from('customers').insert({
+      id: customerId,
+      full_name: data.customerName,
+      phone_e164: data.customerPhone,
+      email: data.customerEmail || null,
+      preferred_language: data.language,
+      created_via: 'website',
+    });
+    if (customerError) {
+      console.error('Supabase customer insert failed:', customerError.message);
+      throw new Error('We could not save your booking details. Please try again or call our service desk.');
+    }
+
+    const { error: bookingError } = await supabase.from('bookings').insert({
+      id: bookingId,
+      booking_reference: reference,
+      customer_id: customerId,
+      service_id: data.serviceId,
+      service_name_en: data.serviceNameEn,
+      service_name_ur: data.serviceNameUr,
+      customer_name: data.customerName,
+      customer_phone: data.customerPhone,
+      customer_email: data.customerEmail || null,
+      problem_description: data.problemDescription,
+      address_line: data.addressLine,
+      city: data.city,
+      area_name: data.areaName,
+      postal_code: data.postalCode || null,
+      scheduled_start: data.scheduledStart,
+      scheduled_end: data.scheduledEnd,
+      status: 'pending',
+      urgency: data.urgency,
+      estimated_amount: data.estimatedAmount ?? null,
+      customer_notes: data.customerNotes || null,
+      language: data.language,
+      source: 'website',
+      privacy_accepted_at: data.privacyAcceptedAt,
+      terms_accepted_at: data.termsAcceptedAt,
+    });
+    if (bookingError) {
+      console.error('Supabase booking insert failed:', bookingError.message);
+      throw new Error('We could not confirm the booking in our system. Please contact our service desk before submitting again.');
+    }
+
+    const booking: Booking = {
+      ...data,
+      id: bookingId,
+      customerId,
+      bookingReference: reference,
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
+      history: [{
+        id: crypto.randomUUID(),
+        bookingId,
+        oldStatus: null,
+        newStatus: 'pending',
+        changedBy: data.customerName,
+        changedByType: 'customer',
+        note: 'Website booking request submitted',
+        createdAt: now,
+      }],
+    };
+    setStored<Booking[]>(STORAGE_KEYS.BOOKINGS, [booking, ...this.getBookings()]);
+    dispatchCatalogUpdated();
+    return booking;
+  },
+
+  async createOnlineInquiry(
+    inquiry: Omit<CustomerInquiry, 'id' | 'createdAt' | 'status'>
+  ): Promise<CustomerInquiry> {
+    if (!supabase) throw new Error('The contact form is temporarily unavailable. Please call our service desk.');
+
+    const record: CustomerInquiry = {
+      ...inquiry,
+      id: crypto.randomUUID(),
+      status: 'new',
+      createdAt: new Date().toISOString(),
+    };
+    const { error } = await supabase.from('customer_inquiries').insert({
+      id: record.id,
+      full_name: record.fullName,
+      phone: record.phone,
+      email: record.email || null,
+      subject: record.subject || 'General Inquiry',
+      message: record.message,
+      status: 'new',
+    });
+    if (error) {
+      console.error('Supabase inquiry insert failed:', error.message);
+      throw new Error('Your message could not be saved right now. Please try again or call our service desk.');
+    }
+
+    setStored<CustomerInquiry[]>(STORAGE_KEYS.INQUIRIES, [record, ...this.getInquiries()]);
+    dispatchCatalogUpdated();
+    return record;
   },
 
   // CSV Exporters for P1 audit & accounting
