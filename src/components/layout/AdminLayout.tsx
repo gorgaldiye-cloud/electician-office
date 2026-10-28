@@ -21,7 +21,7 @@ import {
   UserCheck,
   Star,
 } from 'lucide-react';
-import { repository } from '../../data';
+
 
 interface AdminLayoutProps {
   currentTab: string;
