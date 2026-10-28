@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useAuth } from '../../context/AuthContext';
-import { AppRole } from '../../types';
+import { repository } from '../../data';
 import {
   LayoutDashboard,
   CalendarCheck,
@@ -21,7 +21,7 @@ import {
   UserCheck,
   Star,
 } from 'lucide-react';
-import { repository } from '../../data';
+
 
 interface AdminLayoutProps {
   currentTab: string;
@@ -37,16 +37,163 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   children,
 }) => {
   const { language, direction, t } = useLanguage();
-  const { currentRole, currentStaff, setRole, canViewRevenue, canManageSettings, canManageContent, isTechnician } = useAuth();
+  const { currentRole, currentStaff, isStaff, isLoading, authError, signIn, signOut, canViewRevenue, canManageSettings, canManageContent, isTechnician } = useAuth();
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [loginMessage, setLoginMessage] = useState<string | null>(null);
+  const [isLoadingRecords, setIsLoadingRecords] = useState(false);
+  const [recordsReady, setRecordsReady] = useState(false);
+  const [recordsError, setRecordsError] = useState<string | null>(null);
+
   const pendingCount = repository.getBookings().filter((b) => b.status === 'pending').length;
   const newInquiriesCount = repository.getInquiries().filter((i) => i.status === 'new').length;
 
-  const rolesList: { role: AppRole; label: string }[] = [
-    { role: 'owner', label: t.admin.roles.owner },
-    { role: 'booking_manager', label: t.admin.roles.booking_manager },
-    { role: 'technician', label: t.admin.roles.technician },
-    { role: 'content_editor', label: t.admin.roles.content_editor },
-  ];
+  if (isStaff && currentStaff && currentRole && (isLoadingRecords || !recordsReady)) {
+    return (
+      <div className="min-h-screen bg-[#EEF1F4] flex items-center justify-center px-4">
+        <div className="bg-white rounded-2xl border border-[#D5DBE1] px-8 py-10 text-center shadow-sm">
+          <div className="mx-auto mb-4 h-10 w-10 rounded-full border-4 border-[#D5DBE1] border-t-[#B26A00] animate-spin" />
+          <p className="font-semibold text-[#15191F]">{language === 'ur' ? 'محفوظ ریکارڈ لوڈ ہو رہے ہیں…' : 'Loading secure business records…'}</p>
+          {recordsError && (
+            <div className="mt-4 space-y-3">
+              <p role="alert" className="text-sm text-red-700">{recordsError}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsLoadingRecords(true);
+                  setRecordsError(null);
+                  void repository.initializeRemoteAdminData()
+                    .then(() => setRecordsReady(true))
+                    .catch((error) => setRecordsError(error instanceof Error ? error.message : 'Unable to load staff records.'))
+                    .finally(() => setIsLoadingRecords(false));
+                }}
+                className="rounded-lg bg-[#15191F] px-4 py-2 text-sm font-bold text-white"
+              >
+                {language === 'ur' ? 'دوبارہ کوشش کریں' : 'Retry'}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#EEF1F4] flex items-center justify-center px-4">
+        <div className="bg-white rounded-2xl border border-[#D5DBE1] px-8 py-10 text-center shadow-sm">
+          <div className="mx-auto mb-4 h-10 w-10 rounded-full border-4 border-[#D5DBE1] border-t-[#B26A00] animate-spin" />
+          <p className="font-semibold text-[#15191F]">{language === 'ur' ? 'اسٹاف اکاؤنٹ کی تصدیق ہو رہی ہے…' : 'Verifying staff access…'}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isStaff || !currentStaff || !currentRole) {
+    return (
+      <div className="min-h-screen bg-[#EEF1F4] flex items-center justify-center px-4 py-10">
+        <div className="w-full max-w-md rounded-2xl border border-[#D5DBE1] bg-white p-7 sm:p-9 shadow-sm">
+          <div className="mb-7">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-[#FFC928]/20 text-[#B26A00] text-xl font-black">⚡</div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#B26A00]">Private staff portal</p>
+            <h1 className="mt-2 font-display text-2xl font-extrabold text-[#15191F]">
+              {language === 'ur' ? 'اسٹاف لاگ اِن' : 'Sign in to the operations portal'}
+            </h1>
+            <p className="mt-2 text-sm leading-relaxed text-[#5B6572]">
+              {language === 'ur' ? 'صرف فعال اور مجاز اسٹاف اکاؤنٹس کو رسائی حاصل ہے۔' : 'Only active, authorized staff accounts can access bookings and customer records.'}
+            </p>
+          </div>
+          <form
+            className="space-y-4"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              setIsSigningIn(true);
+              setLoginMessage(null);
+              try {
+                await signIn(loginEmail, loginPassword);
+              } catch (error) {
+                setLoginMessage(error instanceof Error ? error.message : 'Sign-in failed. Please try again.');
+              } finally {
+                setIsSigningIn(false);
+              }
+            }}
+          >
+            <label className="block text-sm font-semibold text-[#2A313B]">
+              Email
+              <input
+                type="email"
+                autoComplete="username"
+                required
+                value={loginEmail}
+                onChange={(event) => setLoginEmail(event.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-[#D5DBE1] px-3.5 py-3 outline-none focus:border-[#B26A00] focus:ring-2 focus:ring-[#FFC928]/30"
+                placeholder="staff@example.com"
+              />
+            </label>
+            <label className="block text-sm font-semibold text-[#2A313B]">
+              {language === 'ur' ? 'پاس ورڈ' : 'Password'}
+              <input
+                type="password"
+                autoComplete="current-password"
+                required
+                value={loginPassword}
+                onChange={(event) => setLoginPassword(event.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-[#D5DBE1] px-3.5 py-3 outline-none focus:border-[#B26A00] focus:ring-2 focus:ring-[#FFC928]/30"
+                placeholder="••••••••••"
+              />
+            </label>
+            {(loginMessage || authError) && (
+              <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-800">
+                {loginMessage || authError}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={isSigningIn}
+              className="w-full rounded-xl bg-[#15191F] px-4 py-3 font-bold text-white transition-colors hover:bg-[#2A313B] disabled:cursor-wait disabled:opacity-60"
+            >
+              {isSigningIn ? (language === 'ur' ? 'لاگ اِن ہو رہا ہے…' : 'Signing in…') : (language === 'ur' ? 'لاگ اِن کریں' : 'Sign in securely')}
+            </button>
+          </form>
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[#EEF1F4] pt-5 text-xs">
+            <button type="button" onClick={onExitAdmin} className="font-semibold text-[#5B6572] hover:text-[#15191F]">
+              {language === 'ur' ? 'ویب سائٹ پر واپس جائیں' : 'Back to website'}
+            </button>
+            <button type="button" onClick={() => { void signOut().catch(() => undefined); }} className="font-semibold text-[#5B6572] hover:text-[#15191F]">
+              {language === 'ur' ? 'دوسرا اکاؤنٹ استعمال کریں' : 'Use another account'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  useEffect(() => {
+    let active = true;
+    if (!isStaff || !currentStaff) {
+      setRecordsReady(false);
+      setRecordsError(null);
+      return () => { active = false; };
+    }
+
+    setIsLoadingRecords(true);
+    setRecordsError(null);
+    void repository.initializeRemoteAdminData()
+      .then(() => {
+        if (active) setRecordsReady(true);
+      })
+      .catch((error) => {
+        if (active) {
+          setRecordsReady(false);
+          setRecordsError(error instanceof Error ? error.message : 'Unable to load staff records.');
+        }
+      })
+      .finally(() => {
+        if (active) setIsLoadingRecords(false);
+      });
+    return () => { active = false; };
+  }, [isStaff, currentStaff?.id]);
 
   const navItems = [
     { id: 'dashboard', label: t.admin.dashboard, icon: LayoutDashboard, show: true },
@@ -128,43 +275,27 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
 
   return (
     <div className="min-h-screen bg-[#EEF1F4] flex flex-col">
-      {/* Top Testing Switcher Banner */}
-      <div className="bg-[#15191F] text-white px-4 sm:px-6 py-2 border-b border-[#2A313B]">
+      {/* Authenticated staff header — no client-side role switching. */}
+      <div className="bg-[#15191F] text-white px-4 sm:px-6 py-3 border-b border-[#2A313B]">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="text-[#FFC928] font-bold uppercase tracking-wider">
-              {t.admin.roleBadge}
-            </span>
-            <span className="font-bold text-white bg-[#2A313B] px-2 py-0.5 rounded">
-              {t.admin.roles[currentRole]}
-            </span>
-            <span className="text-neutral-400 hidden sm:inline">
-              ({currentStaff.fullName})
-            </span>
+          <div className="flex items-center gap-3">
+            <span className="text-[#FFC928] font-bold uppercase tracking-wider">Staff portal</span>
+            <span className="font-bold bg-[#2A313B] px-2.5 py-1 rounded">{t.admin.roles[currentRole]}</span>
+            <span className="text-neutral-300">{currentStaff.fullName}</span>
           </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-neutral-400">{t.admin.switchRole}</span>
-            {rolesList.map((item) => (
-              <button
-                key={item.role}
-                onClick={() => setRole(item.role)}
-                className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-colors ${
-                  currentRole === item.role
-                    ? 'bg-[#FFC928] text-[#15191F]'
-                    : 'bg-[#2A313B] text-neutral-300 hover:text-white'
-                }`}
-              >
-                {item.role.replace('_', ' ').toUpperCase()}
-              </button>
-            ))}
-
+          <div className="flex items-center gap-3">
             <button
               onClick={onExitAdmin}
-              className="ms-2 px-3 py-1 rounded text-[11px] font-bold bg-white text-[#15191F] hover:bg-neutral-200 transition-colors flex items-center gap-1"
+              className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-white text-[#15191F] hover:bg-neutral-200 transition-colors"
+            >
+              {language === 'ur' ? 'ویب سائٹ پر جائیں' : 'Exit portal'}
+            </button>
+            <button
+              onClick={() => { void signOut().catch(() => undefined); }}
+              className="px-3 py-1.5 rounded-lg text-[11px] font-bold border border-white/20 text-white hover:bg-white/10 transition-colors flex items-center gap-1.5"
             >
               <LogOut className="w-3 h-3" />
-              <span>{language === 'ur' ? 'ویب سائٹ پر جائیں' : 'Exit Admin'}</span>
+              <span>{language === 'ur' ? 'لاگ آؤٹ' : 'Sign out'}</span>
             </button>
           </div>
         </div>

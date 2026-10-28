@@ -32,6 +32,8 @@ export const AdminBookings: React.FC = () => {
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [newStatus, setNewStatus] = useState<BookingStatus>('confirmed');
   const [statusNote, setStatusNote] = useState('');
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [showNoteModal, setShowNoteModal] = useState(false);
   const [internalNoteText, setInternalNoteText] = useState('');
 
@@ -53,38 +55,66 @@ export const AdminBookings: React.FC = () => {
     return matchesStatus && matchesSearch;
   });
 
-  const handleAssignTechnician = () => {
-    if (!selectedBooking || !selectedTechId) return;
-    repository.assignTechnician(selectedBooking.id, selectedTechId, currentStaff.fullName);
-    refreshBookings();
-    setShowAssignModal(false);
-    setSelectedTechId('');
+  const handleAssignTechnician = async () => {
+    if (!selectedBooking || !selectedTechId || actionBusy) return;
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      await repository.assignOnlineTechnician(selectedBooking.id, selectedTechId, currentStaff.fullName);
+      refreshBookings();
+      setShowAssignModal(false);
+      setSelectedTechId('');
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Technician could not be assigned.');
+    } finally {
+      setActionBusy(false);
+    }
   };
 
-  const handleStatusChange = () => {
-    if (!selectedBooking) return;
-    repository.updateBookingStatus(
-      selectedBooking.id,
-      newStatus,
-      statusNote || `Updated by ${currentStaff.fullName}`,
-      currentStaff.fullName,
-      'staff'
-    );
-    refreshBookings();
-    setShowStatusModal(false);
-    setStatusNote('');
+  const handleStatusChange = async () => {
+    if (!selectedBooking || actionBusy) return;
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      await repository.updateOnlineBookingStatus(
+        selectedBooking.id,
+        newStatus,
+        statusNote || `Updated by ${currentStaff.fullName}`,
+        currentStaff.fullName
+      );
+      refreshBookings();
+      setShowStatusModal(false);
+      setStatusNote('');
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Booking status could not be saved.');
+    } finally {
+      setActionBusy(false);
+    }
   };
 
-  const handleAddNote = () => {
-    if (!selectedBooking || !internalNoteText.trim()) return;
-    repository.addInternalNote(selectedBooking.id, internalNoteText, currentStaff.fullName);
-    refreshBookings();
-    setShowNoteModal(false);
-    setInternalNoteText('');
+  const handleAddNote = async () => {
+    if (!selectedBooking || !internalNoteText.trim() || actionBusy) return;
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      await repository.addOnlineInternalNote(selectedBooking.id, internalNoteText, currentStaff.fullName);
+      refreshBookings();
+      setShowNoteModal(false);
+      setInternalNoteText('');
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'The internal note could not be saved.');
+    } finally {
+      setActionBusy(false);
+    }
   };
 
   return (
     <div className="space-y-6">
+      {actionError && (
+        <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {actionError}
+        </p>
+      )}
       {/* Title */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
@@ -306,11 +336,11 @@ export const AdminBookings: React.FC = () => {
                 {t.common.cancel}
               </button>
               <button
-                disabled={!selectedTechId}
-                onClick={handleAssignTechnician}
-                className="px-4 py-2 rounded-lg text-xs font-bold bg-[#15191F] text-[#FFC928] disabled:opacity-50"
+                disabled={!selectedTechId || actionBusy}
+                onClick={() => { void handleAssignTechnician(); }}
+                className="px-4 py-2 rounded-lg text-xs font-bold bg-[#15191F] text-[#FFC928] disabled:opacity-50 disabled:cursor-wait"
               >
-                {t.common.confirm}
+                {actionBusy ? (language === 'ur' ? 'محفوظ ہو رہا ہے…' : 'Saving…') : t.common.confirm}
               </button>
             </div>
           </div>
@@ -371,10 +401,11 @@ export const AdminBookings: React.FC = () => {
                 {t.common.cancel}
               </button>
               <button
-                onClick={handleStatusChange}
-                className="px-4 py-2 rounded-lg text-xs font-bold bg-[#15191F] text-[#FFC928]"
+                disabled={actionBusy}
+                onClick={() => { void handleStatusChange(); }}
+                className="px-4 py-2 rounded-lg text-xs font-bold bg-[#15191F] text-[#FFC928] disabled:opacity-50 disabled:cursor-wait"
               >
-                {t.common.save}
+                {actionBusy ? (language === 'ur' ? 'محفوظ ہو رہا ہے…' : 'Saving…') : t.common.save}
               </button>
             </div>
           </div>
@@ -419,10 +450,11 @@ export const AdminBookings: React.FC = () => {
                 {t.common.close}
               </button>
               <button
-                onClick={handleAddNote}
-                className="px-4 py-2 rounded-lg text-xs font-bold bg-[#15191F] text-[#FFC928]"
+                disabled={actionBusy}
+                onClick={() => { void handleAddNote(); }}
+                className="px-4 py-2 rounded-lg text-xs font-bold bg-[#15191F] text-[#FFC928] disabled:opacity-50 disabled:cursor-wait"
               >
-                {t.admin.addNote}
+                {actionBusy ? (language === 'ur' ? 'محفوظ ہو رہا ہے…' : 'Saving…') : t.admin.addNote}
               </button>
             </div>
           </div>

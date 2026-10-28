@@ -11,16 +11,28 @@ export const AdminSettings: React.FC = () => {
 
   const [settings, setSettings] = useState<BusinessSettings>(() => repository.getSettings());
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const handleChange = (field: keyof BusinessSettings, value: any) => {
     setSettings((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    repository.updateSettings(settings, currentStaff.fullName);
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 2500);
+    if (isSaving) return;
+    setIsSaving(true);
+    setSaveError(null);
+    setSavedSuccess(false);
+    try {
+      await repository.updateOnlineBusinessSettings(settings, currentStaff.fullName);
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 2500);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Settings could not be saved. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -37,6 +49,12 @@ export const AdminSettings: React.FC = () => {
           </p>
         </div>
       </div>
+
+      {saveError && (
+        <div role="alert" className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold">
+          {saveError}
+        </div>
+      )}
 
       {savedSuccess && (
         <div className="p-4 rounded-xl bg-[#1E8E5A]/15 border border-[#1E8E5A]/30 text-[#1E8E5A] text-xs font-semibold flex items-center gap-2">
@@ -275,10 +293,17 @@ export const AdminSettings: React.FC = () => {
         <div className="pt-4 border-t border-[#EEF1F4] flex justify-end">
           <button
             type="submit"
-            className="px-6 py-2.5 rounded-xl text-xs font-bold bg-[#15191F] text-[#FFC928] hover:bg-[#2A313B] transition-colors flex items-center gap-2 shadow-sm"
+                  disabled={isSaving}
+            className="disabled:opacity-60 disabled:cursor-wait px-6 py-2.5 rounded-xl text-xs font-bold bg-[#15191F] text-[#FFC928] hover:bg-[#2A313B] transition-colors flex items-center gap-2 shadow-sm"
           >
-            <Save className="w-4 h-4" />
-            <span>Save Settings Changes</span>
+            {isSaving
+              ? (language === 'ur' ? 'محفوظ ہو رہا ہے…' : 'Saving…')
+              : (
+                <>
+                  <Save className="w-4 h-4" />
+                  <span>Save Settings Changes</span>
+                </>
+              )}
           </button>
         </div>
       </form>

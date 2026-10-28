@@ -22,6 +22,8 @@ export const AdminStaff: React.FC = () => {
   const [staffList, setStaffList] = useState<Staff[]>(() => repository.getStaff());
   const [schedules, setSchedules] = useState<StaffSchedule[]>(() => repository.getStaffSchedules());
   const [blocks, setBlocks] = useState<AvailabilityBlock[]>(() => repository.getAvailabilityBlocks());
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // New Block Modal
   const [showBlockModal, setShowBlockModal] = useState(false);
@@ -37,38 +39,59 @@ export const AdminStaff: React.FC = () => {
     setBlocks(repository.getAvailabilityBlocks());
   };
 
-  const handleCreateBlock = (e: React.FormEvent) => {
+  const handleCreateBlock = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!blockReason) return;
+    if (!blockReason.trim() || actionBusy) return;
 
     const tech = staffList.find((s) => s.id === blockTechId);
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      await repository.createOnlineAvailabilityBlock(
+        {
+          technicianId: blockTechId || undefined,
+          technicianName: tech ? tech.fullName : undefined,
+          startsAt: new Date(blockStartDate).toISOString(),
+          endsAt: new Date(blockEndDate).toISOString(),
+          blockType,
+          reason: blockReason.trim(),
+        },
+        currentStaff.fullName
+      );
 
-    repository.createAvailabilityBlock(
-      {
-        technicianId: blockTechId || undefined,
-        technicianName: tech ? tech.fullName : undefined,
-        startsAt: new Date(blockStartDate).toISOString(),
-        endsAt: new Date(blockEndDate).toISOString(),
-        blockType,
-        reason: blockReason,
-      },
-      currentStaff.fullName
-    );
-
-    refresh();
-    setShowBlockModal(false);
-    setBlockReason('');
+      refresh();
+      setShowBlockModal(false);
+      setBlockReason('');
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'The time-off block could not be saved.');
+    } finally {
+      setActionBusy(false);
+    }
   };
 
-  const handleDeleteBlock = (id: string) => {
-    repository.deleteAvailabilityBlock(id, currentStaff.fullName);
-    refresh();
+  const handleDeleteBlock = async (id: string) => {
+    if (actionBusy) return;
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      await repository.deleteOnlineAvailabilityBlock(id, currentStaff.fullName);
+      refresh();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'The time-off block could not be deleted.');
+    } finally {
+      setActionBusy(false);
+    }
   };
 
   const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
   return (
     <div className="space-y-8">
+      {actionError && (
+        <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {actionError}
+        </p>
+      )}
       {/* Header */}
       <div>
         <h1 className="font-display font-extrabold text-2xl text-[#15191F]">
@@ -193,8 +216,9 @@ export const AdminStaff: React.FC = () => {
                 </div>
 
                 <button
-                  onClick={() => handleDeleteBlock(blk.id)}
-                  className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 transition-colors"
+                  onClick={() => { void handleDeleteBlock(blk.id); }}
+                  disabled={actionBusy}
+                  className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 transition-colors disabled:opacity-50 disabled:cursor-wait"
                   title="Remove block"
                 >
                   <Trash2 className="w-3.5 h-3.5" />

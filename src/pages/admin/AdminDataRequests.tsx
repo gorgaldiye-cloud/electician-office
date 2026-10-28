@@ -10,18 +10,34 @@ export const AdminDataRequests: React.FC = () => {
   const { currentStaff } = useAuth();
 
   const [requests, setRequests] = useState<DataRequest[]>(() => repository.getDataRequests());
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const refresh = () => {
     setRequests(repository.getDataRequests());
   };
 
-  const handleStatusChange = (id: string, status: 'open' | 'approved' | 'completed' | 'rejected') => {
-    repository.updateDataRequestStatus(id, status, currentStaff.fullName);
-    refresh();
+  const handleStatusChange = async (id: string, status: 'open' | 'approved' | 'completed' | 'rejected') => {
+    if (busyId) return;
+    setBusyId(id);
+    setActionError(null);
+    try {
+      await repository.updateOnlineDataRequestStatus(id, status, currentStaff.fullName);
+      refresh();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'The privacy request status could not be saved.');
+    } finally {
+      setBusyId(null);
+    }
   };
 
   return (
     <div className="space-y-6">
+      {actionError && (
+        <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {actionError}
+        </p>
+      )}
       <div>
         <h1 className="font-display font-extrabold text-2xl text-[#15191F]">
           {language === 'ur' ? 'پرائیویسی اور ڈیٹا ریکویسٹس' : 'Privacy & Data Protection Requests'}
@@ -79,8 +95,9 @@ export const AdminDataRequests: React.FC = () => {
                   <td className="py-3.5 px-4 text-end">
                     {r.status !== 'completed' && (
                       <button
-                        onClick={() => handleStatusChange(r.id, 'completed')}
-                        className="px-3 py-1 rounded text-xs font-bold bg-[#1E8E5A] text-white hover:bg-[#167046]"
+                        onClick={() => { void handleStatusChange(r.id, 'completed'); }}
+                        disabled={busyId === r.id}
+                        className="px-3 py-1 rounded text-xs font-bold bg-[#1E8E5A] text-white hover:bg-[#167046] disabled:opacity-50 disabled:cursor-wait"
                       >
                         Complete
                       </button>

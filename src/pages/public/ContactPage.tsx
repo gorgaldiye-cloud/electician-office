@@ -27,10 +27,11 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
   const [message, setMessage] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName || !phone || !message) {
+    if (!fullName.trim() || !phone.trim() || !message.trim()) {
       setErrorMessage(
         language === 'ur'
           ? 'برائے مہربانی نام، فون نمبر اور پیغام لازمی درج کریں۔'
@@ -40,15 +41,28 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
     }
 
     setErrorMessage('');
-    repository.createInquiry({
-      fullName,
-      phone,
-      email: email || undefined,
-      subject: subject || 'General Inquiry',
-      message,
-    });
-
-    setIsSubmitted(true);
+    setIsSubmitting(true);
+    try {
+      await repository.createOnlineInquiry({
+        fullName: fullName.trim(),
+        phone: phone.trim(),
+        email: email.trim() || undefined,
+        subject: subject.trim() || 'General Inquiry',
+        message: message.trim(),
+      });
+      setIsSubmitted(true);
+    } catch (error) {
+      console.error('Contact form submission failed:', error);
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : (language === 'ur'
+              ? 'پیغام محفوظ نہیں ہو سکا۔ براہِ کرم دوبارہ کوشش کریں۔'
+              : 'Your message could not be saved. Please try again or call our service desk.')
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -297,10 +311,13 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
 
                 <button
                   type="submit"
-                  className="px-6 py-3 rounded-lg text-xs font-bold bg-[#15191F] text-white hover:bg-[#2A313B] transition-colors flex items-center gap-2"
+                  disabled={isSubmitting}
+                  className="px-6 py-3 rounded-lg text-xs font-bold bg-[#15191F] text-white hover:bg-[#2A313B] transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-wait"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span>{t.common.submit}</span>
+                  <span>{isSubmitting
+                    ? (language === 'ur' ? 'پیغام بھیجا جا رہا ہے…' : 'Sending message…')
+                    : t.common.submit}</span>
                 </button>
               </form>
             )}
