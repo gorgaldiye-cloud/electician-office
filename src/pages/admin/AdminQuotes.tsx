@@ -20,6 +20,8 @@ export const AdminQuotes: React.FC = () => {
 
   const [quotes, setQuotes] = useState<Quote[]>(() => repository.getQuotes());
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Create Modal
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -48,9 +50,9 @@ export const AdminQuotes: React.FC = () => {
     setItems((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleCreateQuote = (e: React.FormEvent) => {
+  const handleCreateQuote = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customerName) return;
+    if (!customerName.trim() || !customerPhone.trim() || isSaving) return;
 
     const quoteItems: QuoteItem[] = items.map((it, idx) => ({
       id: `qi-${Date.now()}-${idx}`,
@@ -60,47 +62,65 @@ export const AdminQuotes: React.FC = () => {
       unitPrice: it.price,
       lineTotal: it.qty * it.price,
     }));
-
     const subtotal = quoteItems.reduce((acc, it) => acc + it.lineTotal, 0);
     const validUntilDate = new Date(Date.now() + validDays * 86400000).toISOString().split('T')[0];
 
-    repository.createQuote(
-      {
-        customerId: `cust-${Date.now()}`,
-        customerName,
-        customerPhone,
-        customerAddress,
-        status: 'sent',
-        subtotal,
-        discount: 0,
-        taxRate: 0,
-        taxAmount: 0,
-        total: subtotal,
-        validUntil: validUntilDate,
-        notes,
-        items: quoteItems,
-      },
-      currentStaff.fullName
-    );
-
-    refresh();
-    setShowCreateModal(false);
-    setCustomerName('');
-    setCustomerPhone('');
-    setCustomerAddress('');
-    setNotes('');
+    setIsSaving(true);
+    setActionError(null);
+    try {
+      await repository.createOnlineQuote(
+        {
+          customerId: '',
+          customerName: customerName.trim(),
+          customerPhone: customerPhone.trim(),
+          customerAddress: customerAddress.trim(),
+          status: 'sent',
+          subtotal,
+          discount: 0,
+          taxRate: 0,
+          taxAmount: 0,
+          total: subtotal,
+          validUntil: validUntilDate,
+          notes,
+          items: quoteItems,
+        },
+        currentStaff.fullName
+      );
+      refresh();
+      setShowCreateModal(false);
+      setCustomerName('');
+      setCustomerPhone('');
+      setCustomerAddress('');
+      setNotes('');
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'The quotation could not be saved.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleConvertToInvoice = (quoteId: string) => {
-    const inv = repository.convertQuoteToInvoice(quoteId, currentStaff.fullName);
-    if (inv) {
-      alert(`Successfully generated Invoice ${inv.invoiceNumber} for PKR ${inv.total}!`);
+  const handleConvertToInvoice = async (quoteId: string) => {
+    if (isSaving) return;
+    setIsSaving(true);
+    setActionError(null);
+    try {
+      const invoice = await repository.convertOnlineQuoteToInvoice(quoteId, currentStaff.fullName);
+      alert(`Successfully generated Invoice ${invoice.invoiceNumber} for PKR ${invoice.total}!`);
       refresh();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'The quotation could not be converted.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
   return (
     <div className="space-y-6">
+      {actionError && (
+        <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {actionError}
+        </p>
+      )}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="font-display font-extrabold text-2xl text-[#15191F]">
@@ -179,7 +199,7 @@ export const AdminQuotes: React.FC = () => {
                       <div className="flex items-center justify-end gap-2">
                         {quo.status !== 'approved' && (
                           <button
-                            onClick={() => handleConvertToInvoice(quo.id)}
+                            onClick={() => { void handleConvertToInvoice(quo.id); }}
                             className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-[#15191F] text-[#FFC928] hover:bg-[#2A313B] transition-colors"
                             title="Convert to Invoice"
                           >
@@ -364,9 +384,10 @@ export const AdminQuotes: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-lg text-xs font-bold bg-[#15191F] text-[#FFC928]"
+                  disabled={isSaving}
+                  className="px-5 py-2 rounded-lg text-xs font-bold bg-[#15191F] text-[#FFC928] disabled:opacity-50 disabled:cursor-wait"
                 >
-                  Issue Quotation
+                  {isSaving ? (language === 'ur' ? 'محفوظ ہو رہا ہے…' : 'Saving…') : 'Issue Quotation'}
                 </button>
               </div>
             </form>
@@ -457,7 +478,7 @@ export const AdminQuotes: React.FC = () => {
 
               <div className="pt-4 border-t border-[#EEF1F4] flex items-center justify-between text-xs">
                 <button
-                  onClick={() => handleConvertToInvoice(selectedQuote.id)}
+                  onClick={() => { void handleConvertToInvoice(selectedQuote.id); }}
                   className="px-4 py-2 rounded-lg font-bold bg-[#1E8E5A] text-white hover:bg-[#167046]"
                 >
                   Approve & Convert to Invoice
