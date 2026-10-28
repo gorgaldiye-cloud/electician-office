@@ -95,8 +95,9 @@ export const AdminDataRequests: React.FC = () => {
                   <td className="py-3.5 px-4 text-end">
                     {r.status !== 'completed' && (
                       <button
-                        onClick={() => handleStatusChange(r.id, 'completed')}
-                        className="px-3 py-1 rounded text-xs font-bold bg-[#1E8E5A] text-white hover:bg-[#167046]"
+                        onClick={() => { void handleStatusChange(r.id, 'completed'); }}
+                        disabled={busyId === r.id}
+                        className="px-3 py-1 rounded text-xs font-bold bg-[#1E8E5A] text-white hover:bg-[#167046] disabled:opacity-50 disabled:cursor-wait"
                       >
                         Complete
                       </button>
