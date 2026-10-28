@@ -29,6 +29,10 @@ export const TrackBookingPage: React.FC<TrackBookingPageProps> = ({ initialRefer
   const [currentBooking, setCurrentBooking] = useState<Booking | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [isActionLoading, setIsActionLoading] = useState(false);
+  const [availableRescheduleSlots, setAvailableRescheduleSlots] = useState<{ time: string; start: string; end: string; available: boolean }[]>([]);
+  const [isLoadingRescheduleSlots, setIsLoadingRescheduleSlots] = useState(false);
 
   // Cancel / Reschedule Modals
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -41,58 +45,122 @@ export const TrackBookingPage: React.FC<TrackBookingPageProps> = ({ initialRefer
   });
   const [newSlot, setNewSlot] = useState('');
 
-  const lookupBooking = (refToLookup: string) => {
+  const lookupBooking = async (refToLookup: string, phoneToLookup: string) => {
     setErrorMsg('');
     setHasSearched(true);
     const clean = refToLookup.trim().toUpperCase();
-    if (!clean) {
-      setErrorMsg(language === 'ur' ? 'برائے مہربانی ریفرنس نمبر درج کریں۔' : 'Please enter a booking reference.');
+    if (!clean || !phoneToLookup.trim()) {
+      setErrorMsg(
+        language === 'ur'
+          ? 'برائے مہربانی بکنگ ریفرنس اور وہی موبائل نمبر درج کریں جو بکنگ کے وقت دیا تھا۔'
+          : 'Please enter both the booking reference and the mobile number used when booking.'
+      );
       setCurrentBooking(null);
       return;
     }
 
-    const found = repository.getBookingByReference(clean);
-    if (found) {
-      setCurrentBooking(found);
-    } else {
+    setIsSearching(true);
+    try {
+      const found = await repository.trackOnlineBooking(clean, phoneToLookup);
+      if (found) {
+        setCurrentBooking(found);
+      } else {
+        setCurrentBooking(null);
+        setErrorMsg(t.tracking.notFound);
+      }
+    } catch (error) {
       setCurrentBooking(null);
-      setErrorMsg(t.tracking.notFound);
+      setErrorMsg(
+        error instanceof Error
+          ? error.message
+          : (language === 'ur' ? 'بکنگ کی تصدیق نہیں ہو سکی۔ دوبارہ کوشش کریں۔' : 'We could not verify those details. Please try again.')
+      );
+    } finally {
+      setIsSearching(false);
     }
   };
 
+  // Prefill references from confirmation but never reveal private booking data without phone verification.
   useEffect(() => {
     if (initialReference) {
-      lookupBooking(initialReference);
+      setReferenceInput(initialReference);
+      setCurrentBooking(null);
+      setHasSearched(false);
     }
   }, [initialReference]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    lookupBooking(referenceInput);
+    void lookupBooking(referenceInput, phoneInput);
   };
 
-  const handleCancelSubmit = () => {
-    if (!currentBooking) return;
-    const updated = repository.cancelBooking(currentBooking.id, cancelReason || 'Customer requested cancellation');
-    if (updated) {
+  const handleCancelSubmit = async () => {
+    if (!currentBooking || !phoneInput.trim()) return;
+    setIsActionLoading(true);
+    setErrorMsg('');
+    try {
+      const updated = await repository.cancelOnlineBooking(
+        currentBooking.bookingReference,
+        phoneInput,
+        cancelReason || 'Customer requested cancellation'
+      );
       setCurrentBooking(updated);
       setShowCancelModal(false);
       setCancelReason('');
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : 'This booking could not be cancelled online.');
+    } finally {
+      setIsActionLoading(false);
     }
   };
 
-  const handleRescheduleSubmit = () => {
-    if (!currentBooking || !newSlot) return;
-    const slots = repository.getAvailableSlots(newDate);
-    const chosen = slots.find((s) => s.time === newSlot);
-    if (!chosen) return;
+  const handleRescheduleSubmit = async () => {
+    if (!currentBooking || !phoneInput.trim() || !newSlot) return;
+    const chosen = availableRescheduleSlots.find((slot) => slot.time === newSlot && slot.available);
+    if (!chosen) {
+      setErrorMsg(language === 'ur' ? 'یہ وقت اب دستیاب نہیں۔ دوسرا وقت منتخب کریں۔' : 'That appointment slot is no longer available.');
+      return;
+    }
 
-    const updated = repository.rescheduleBooking(currentBooking.id, chosen.start, chosen.end, currentBooking.customerName);
-    if (updated) {
+    setIsActionLoading(true);
+    setErrorMsg('');
+    try {
+      const updated = await repository.rescheduleOnlineBooking(
+        currentBooking.bookingReference,
+        phoneInput,
+        chosen.start,
+        chosen.end
+      );
       setCurrentBooking(updated);
       setShowRescheduleModal(false);
+      setNewSlot('');
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : 'This booking could not be rescheduled online.');
+    } finally {
+      setIsActionLoading(false);
     }
   };
+
+  useEffect(() => {
+    let active = true;
+    if (!showRescheduleModal || !currentBooking) {
+      setAvailableRescheduleSlots([]);
+      return;
+    }
+    setIsLoadingRescheduleSlots(true);
+    setAvailableRescheduleSlots([]);
+    void repository.getOnlineAvailableSlots(newDate, currentBooking.serviceId)
+      .then((slots) => {
+        if (active) setAvailableRescheduleSlots(slots);
+      })
+      .catch((error) => {
+        if (active) setErrorMsg(error instanceof Error ? error.message : 'Appointment times are temporarily unavailable.');
+      })
+      .finally(() => {
+        if (active) setIsLoadingRescheduleSlots(false);
+      });
+    return () => { active = false; };
+  }, [showRescheduleModal, newDate, currentBooking?.serviceId]);
 
   const statusSteps: { key: BookingStatus; label: string }[] = [
     { key: 'pending', label: t.statusLabels.pending },
@@ -115,8 +183,6 @@ export const TrackBookingPage: React.FC<TrackBookingPageProps> = ({ initialRefer
         return -1;
     }
   };
-
-  const availableRescheduleSlots = repository.getAvailableSlots(newDate);
 
   return (
     <div className="py-12 lg:py-16 bg-neutral-50 min-h-screen">
@@ -146,14 +212,29 @@ export const TrackBookingPage: React.FC<TrackBookingPageProps> = ({ initialRefer
                 placeholder={t.tracking.refPlaceholder}
                 className="w-full ps-11 pe-4 py-3 rounded-xl border border-[#D5DBE1] focus:border-[#15191F] outline-none text-sm font-mono tracking-wider"
                 dir="ltr"
+                autoComplete="off"
+                required
               />
             </div>
-
+            <div className="flex-1 relative">
+              <Phone className="w-4 h-4 absolute start-3.5 top-3.5 text-[#5B6572]" />
+              <input
+                type="tel"
+                value={phoneInput}
+                onChange={(e) => setPhoneInput(e.target.value)}
+                placeholder={language === 'ur' ? 'بکنگ والا موبائل نمبر' : 'Mobile number used for booking'}
+                className="w-full ps-10 pe-4 py-3 rounded-xl border border-[#D5DBE1] focus:border-[#15191F] outline-none text-sm"
+                autoComplete="tel"
+                dir="ltr"
+                required
+              />
+            </div>
             <button
               type="submit"
-              className="px-7 py-3 rounded-xl text-sm font-bold bg-[#15191F] text-[#FFC928] hover:bg-[#2A313B] transition-colors whitespace-nowrap"
+              disabled={isSearching}
+              className="px-7 py-3 rounded-xl text-sm font-bold bg-[#15191F] text-[#FFC928] hover:bg-[#2A313B] transition-colors whitespace-nowrap disabled:opacity-60 disabled:cursor-wait"
             >
-              {t.tracking.trackButton}
+              {isSearching ? (language === 'ur' ? 'تصدیق ہو رہی ہے…' : 'Verifying…') : t.tracking.trackButton}
             </button>
           </form>
 
@@ -407,7 +488,8 @@ export const TrackBookingPage: React.FC<TrackBookingPageProps> = ({ initialRefer
                 </button>
                 <button
                   onClick={handleCancelSubmit}
-                  className="px-4 py-2 rounded-lg text-xs font-bold bg-[#C62828] text-white hover:bg-[#B71C1C]"
+                  disabled={isActionLoading}
+                  className="px-4 py-2 rounded-lg text-xs font-bold bg-[#C62828] text-white hover:bg-[#B71C1C] disabled:opacity-60 disabled:cursor-wait"
                 >
                   {t.common.confirm}
                 </button>
@@ -444,6 +526,11 @@ export const TrackBookingPage: React.FC<TrackBookingPageProps> = ({ initialRefer
                   <label className="text-xs font-semibold text-[#5B6572] block mb-1">
                     {t.booking.timeSlotLabel}
                   </label>
+                  {isLoadingRescheduleSlots && (
+                    <p className="mb-2 text-xs text-[#5B6572]">
+                      {language === 'ur' ? 'اوقات چیک ہو رہے ہیں…' : 'Checking live availability…'}
+                    </p>
+                  )}
                   <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto">
                     {availableRescheduleSlots.map((slot, i) => (
                       <button
@@ -475,9 +562,9 @@ export const TrackBookingPage: React.FC<TrackBookingPageProps> = ({ initialRefer
                   {t.common.cancel}
                 </button>
                 <button
-                  disabled={!newSlot}
+                  disabled={!newSlot || isActionLoading}
                   onClick={handleRescheduleSubmit}
-                  className="px-4 py-2 rounded-lg text-xs font-bold bg-[#15191F] text-[#FFC928] disabled:opacity-50"
+                  className="px-4 py-2 rounded-lg text-xs font-bold bg-[#15191F] text-[#FFC928] disabled:opacity-50 disabled:cursor-wait"
                 >
                   {t.common.confirm}
                 </button>
