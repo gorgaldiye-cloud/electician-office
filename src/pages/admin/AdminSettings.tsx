@@ -295,8 +295,16 @@ export const AdminSettings: React.FC = () => {
             type="submit"
                   disabled={isSaving}
             className="disabled:opacity-60 disabled:cursor-wait px-6 py-2.5 rounded-xl text-xs font-bold bg-[#15191F] text-[#FFC928] hover:bg-[#2A313B] transition-colors flex items-center gap-2 shadow-sm"
-          >{isSaving ? (language === 'ur' ? 'محفوظ ہو رہا ہے…' : 'Saving…') : <Save className="w-4 h-4" />
-            <span>Save Settings Changes</span>}</button>
+          >
+            {isSaving
+              ? (language === 'ur' ? 'محفوظ ہو رہا ہے…' : 'Saving…')
+              : (
+                <>
+                  <Save className="w-4 h-4" />
+                  <span>Save Settings Changes</span>
+                </>
+              )}
+          </button>
         </div>
       </form>
     </div>
