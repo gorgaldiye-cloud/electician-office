@@ -59,6 +59,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ initialServiceId, 
   const [submittedBooking, setSubmittedBooking] = useState<Booking | null>(null);
   const [copiedRef, setCopiedRef] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const ArrowIcon = direction === 'rtl' ? ArrowLeft : ArrowRight;
   const BackIcon = direction === 'rtl' ? ArrowRight : ArrowLeft;
@@ -164,7 +165,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ initialServiceId, 
     setCurrentStep((prev) => Math.max(prev - 1, 1));
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!termsAccepted || !privacyAccepted) {
       setErrorMessage(
         language === 'ur'
@@ -174,50 +175,64 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ initialServiceId, 
       return;
     }
 
-    // Normalized phone
-    let phoneE164 = customerPhone.replace(/\D/g, '');
-    if (phoneE164.startsWith('03')) {
-      phoneE164 = '92' + phoneE164.substring(1);
-    } else if (phoneE164.startsWith('3') && phoneE164.length === 10) {
-      phoneE164 = '92' + phoneE164;
+    setErrorMessage('');
+    setIsSubmitting(true);
+
+    try {
+      // Normalize a Pakistani mobile number before saving the customer record.
+      let phoneE164 = customerPhone.replace(/\D/g, '');
+      if (phoneE164.startsWith('03')) {
+        phoneE164 = '92' + phoneE164.substring(1);
+      } else if (phoneE164.startsWith('3') && phoneE164.length === 10) {
+        phoneE164 = '92' + phoneE164;
+      }
+      phoneE164 = '+' + phoneE164;
+
+      const chosenSlotObj = availableSlots.find((s) => s.time === selectedSlot);
+      if (!chosenSlotObj || !chosenSlotObj.available) {
+        throw new Error(
+          language === 'ur'
+            ? 'یہ وقت اب دستیاب نہیں۔ براہِ کرم دوسرا سلاٹ منتخب کریں۔'
+            : 'That appointment slot is no longer available. Please choose another slot.'
+        );
+      }
+
+      const newBooking = await repository.createOnlineBooking({
+        serviceId: selectedService.id,
+        serviceNameEn: selectedService.nameEn,
+        serviceNameUr: selectedService.nameUr,
+        customerName: customerName.trim(),
+        customerPhone: phoneE164,
+        customerEmail: customerEmail.trim() || undefined,
+        problemDescription: problemDescription.trim(),
+        addressLine: addressLine.trim(),
+        city: selectedCity,
+        areaName: selectedArea.area,
+        postalCode: selectedArea.postalCode,
+        scheduledStart: chosenSlotObj.start,
+        scheduledEnd: chosenSlotObj.end,
+        urgency,
+        estimatedAmount: selectedService.basePrice || undefined,
+        language,
+        source: 'website',
+        privacyAcceptedAt: new Date().toISOString(),
+        termsAcceptedAt: new Date().toISOString(),
+      });
+
+      // The reference is shown only after Supabase confirms the insert succeeded.
+      setSubmittedBooking(newBooking);
+    } catch (error) {
+      console.error('Website booking submission failed:', error);
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : (language === 'ur'
+              ? 'بکنگ محفوظ نہیں ہو سکی۔ براہِ کرم دوبارہ کوشش کریں۔'
+              : 'We could not save your booking. Please try again or call our service desk.')
+      );
+    } finally {
+      setIsSubmitting(false);
     }
-    phoneE164 = '+' + phoneE164;
-
-    const chosenSlotObj = availableSlots.find((s) => s.time === selectedSlot);
-    const startIso = chosenSlotObj?.start || new Date().toISOString();
-    const endIso = chosenSlotObj?.end || new Date(Date.now() + 3600000).toISOString();
-
-    const newBooking = repository.createBooking({
-      customerId: `cust-${Date.now()}`,
-      serviceId: selectedService.id,
-      serviceNameEn: selectedService.nameEn,
-      serviceNameUr: selectedService.nameUr,
-      customerName,
-      customerPhone: phoneE164,
-      customerEmail: customerEmail || undefined,
-      problemDescription,
-      addressLine,
-      city: selectedCity,
-      areaName: selectedArea.area,
-      postalCode: selectedArea.postalCode,
-      scheduledStart: startIso,
-      scheduledEnd: endIso,
-      urgency,
-      estimatedAmount: selectedService.basePrice || undefined,
-      language,
-      source: 'website',
-      privacyAcceptedAt: new Date().toISOString(),
-      termsAcceptedAt: new Date().toISOString(),
-      attachments: photos.map((url, i) => ({
-        id: `att-${i}`,
-        fileName: `photo_${i + 1}.jpg`,
-        fileUrl: url,
-        fileSize: 1024 * 500,
-        fileType: 'image/jpeg',
-      })),
-    });
-
-    setSubmittedBooking(newBooking);
   };
 
   const copyReference = () => {
@@ -836,9 +851,12 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({ initialServiceId, 
               <button
                 type="button"
                 onClick={handleSubmit}
-                className="px-7 py-3 rounded-lg text-sm font-extrabold bg-[#15191F] text-white hover:bg-[#2A313B] shadow-md transition-all active:scale-[0.98]"
+                disabled={isSubmitting}
+                className="px-7 py-3 rounded-lg text-sm font-extrabold bg-[#15191F] text-white hover:bg-[#2A313B] shadow-md transition-all active:scale-[0.98] disabled:opacity-60 disabled:cursor-wait"
               >
-                {t.booking.submitButton}
+                {isSubmitting
+                  ? (language === 'ur' ? 'بکنگ محفوظ ہو رہی ہے…' : 'Saving booking…')
+                  : t.booking.submitButton}
               </button>
             )}
           </div>
