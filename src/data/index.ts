@@ -59,6 +59,8 @@ const STORAGE_KEYS = {
   PROJECTS: 'abc_projects_remote_v1',
   FAQS: 'abc_faqs_remote_v1',
   BLOG_POSTS: 'abc_blog_posts_remote_v1',
+  ADMIN_SERVICES: 'abc_admin_services_remote_v1',
+  ADMIN_REVIEWS: 'abc_admin_reviews_remote_v1',
 };
 
 function getStored<T>(key: string, fallback: T): T {
@@ -110,6 +112,17 @@ export const repository = {
   },
 
   // Services
+  getAdminServices(): Service[] {
+    const list = getStored<Service[]>(
+      STORAGE_KEYS.ADMIN_SERVICES,
+      isSupabaseConfigured ? this.getServices() : initialServices
+    );
+    return list.map((service) => ({
+      ...service,
+      pricingType: 'inspection_required',
+      basePrice: null,
+    }));
+  },
   getServices(): Service[] {
     const list = getStored<Service[]>(STORAGE_KEYS.SERVICES, isSupabaseConfigured ? [] : initialServices);
     // Enforce PRD v1.1 Decision 3: public pricing display mode is inspection_only
@@ -556,6 +569,12 @@ export const repository = {
   getFAQs(): FAQ[] {
     return getStored<FAQ[]>(STORAGE_KEYS.FAQS, isSupabaseConfigured ? [] : initialFAQs);
   },
+  getAdminReviews(): Review[] {
+    return getStored<Review[]>(
+      STORAGE_KEYS.ADMIN_REVIEWS,
+      isSupabaseConfigured ? this.getReviews(true) : initialReviews
+    );
+  },
   getReviews(includeUnmoderated = false): Review[] {
     const revs = getStored<Review[]>(STORAGE_KEYS.REVIEWS, isSupabaseConfigured ? [] : initialReviews);
     if (includeUnmoderated) return revs;
@@ -685,6 +704,144 @@ export const repository = {
       dispatchCatalogUpdated();
     } catch (error) {
       console.error('Supabase public catalog refresh failed:', error);
+    }
+  },
+
+  // Load private operational records only after Supabase Auth has verified an active staff profile.
+  // Row-level security remains authoritative; records that the current staff role cannot read stay empty.
+  async initializeRemoteAdminData(): Promise<void> {
+    if (!supabase) return;
+
+    try {
+      const [
+        bookingRows, historyRows, attachmentRows, inquiryRows, customerRows,
+        staffRows, scheduleRows, blockRows, quoteRows, quoteItemRows,
+        invoiceRows, invoiceItemRows, paymentRows, dataRequestRows, auditRows,
+        serviceRows, reviewRows,
+      ] = await Promise.all([
+        supabase.from('bookings').select('*').order('created_at', { ascending: false }),
+        supabase.from('booking_status_history').select('*').order('created_at', { ascending: false }),
+        supabase.from('booking_attachments').select('*').order('created_at', { ascending: true }),
+        supabase.from('customer_inquiries').select('*').order('created_at', { ascending: false }),
+        supabase.from('customers').select('*').order('created_at', { ascending: false }),
+        supabase.from('staff_profiles').select('*').order('created_at', { ascending: true }),
+        supabase.from('staff_schedules').select('*').order('weekday', { ascending: true }),
+        supabase.from('availability_blocks').select('*').order('starts_at', { ascending: true }),
+        supabase.from('quotes').select('*').order('created_at', { ascending: false }),
+        supabase.from('quote_items').select('*'),
+        supabase.from('invoices').select('*').order('created_at', { ascending: false }),
+        supabase.from('invoice_items').select('*'),
+        supabase.from('payments').select('*').order('paid_at', { ascending: false }),
+        supabase.from('data_requests').select('*').order('created_at', { ascending: false }),
+        supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(500),
+        supabase.from('services').select('*').order('sort_order', { ascending: true }),
+        supabase.from('reviews').select('*').order('review_date', { ascending: false }),
+      ]);
+
+      const logFailure = (label: string, response: { error: any }) => {
+        if (response.error) {
+          console.warn('Staff data section is unavailable for this role:', label, response.error.message);
+        }
+      };
+      const rows = (response: { data: any[] | null; error: any }, label: string): any[] => {
+        logFailure(label, response);
+        return !response.error && Array.isArray(response.data) ? response.data : [];
+      };
+
+      const staffRecords = rows(staffRows, 'staff profiles');
+      const staffById = new Map<string, any>(
+        staffRecords.map((row) => [row.id, toCamelRecord<Staff>(row)])
+      );
+
+      const historiesByBooking = new Map<string, any[]>();
+      for (const row of rows(historyRows, 'booking status history')) {
+        const item = toCamelRecord<any>(row);
+        historiesByBooking.set(item.bookingId, [...(historiesByBooking.get(item.bookingId) || []), item]);
+      }
+      const attachmentsByBooking = new Map<string, any[]>();
+      for (const row of rows(attachmentRows, 'booking attachments')) {
+        const item = {
+          ...toCamelRecord<any>(row),
+          fileUrl: row.storage_path,
+        };
+        attachmentsByBooking.set(item.bookingId, [...(attachmentsByBooking.get(item.bookingId) || []), item]);
+      }
+      const bookingData = rows(bookingRows, 'bookings').map((row) => ({
+        ...toCamelRecord<Booking>(row),
+        assignedTechnicianName: row.assigned_technician_name ||
+          staffById.get(row.assigned_technician_id)?.fullName,
+        history: historiesByBooking.get(row.id) || [],
+        attachments: attachmentsByBooking.get(row.id) || [],
+      }));
+      if (!bookingRows.error) setStored<Booking[]>(STORAGE_KEYS.BOOKINGS, bookingData);
+
+      const inquiries = rows(inquiryRows, 'customer inquiries').map((row) => toCamelRecord<CustomerInquiry>(row));
+      if (!inquiryRows.error) setStored<CustomerInquiry[]>(STORAGE_KEYS.INQUIRIES, inquiries);
+
+      const customers = rows(customerRows, 'customers').map((row) => toCamelRecord<any>(row));
+      // AdminCustomers derives the visible list from bookings. Keep the customer cache available for future modules.
+      if (!customerRows.error) setStored('abc_customers_remote_v1', customers);
+
+      const staff = staffRecords.map((row) => toCamelRecord<Staff>(row));
+      if (!staffRows.error) setStored<Staff[]>(STORAGE_KEYS.STAFF, staff);
+
+      const schedules = rows(scheduleRows, 'staff schedules').map((row) => ({
+        ...toCamelRecord<StaffSchedule>(row),
+        technicianName: staffById.get(row.technician_id)?.fullName || '',
+      }));
+      if (!scheduleRows.error) setStored<StaffSchedule[]>(STORAGE_KEYS.SCHEDULES, schedules);
+
+      const blocks = rows(blockRows, 'availability blocks').map((row) => ({
+        ...toCamelRecord<AvailabilityBlock>(row),
+        technicianName: staffById.get(row.technician_id)?.fullName || undefined,
+      }));
+      if (!blockRows.error) setStored<AvailabilityBlock[]>(STORAGE_KEYS.BLOCKS, blocks);
+
+      const quoteItems = rows(quoteItemRows, 'quotation items');
+      const quotes = rows(quoteRows, 'quotations').map((row) => ({
+        ...toCamelRecord<Quote>(row),
+        items: quoteItems.filter((item) => item.quote_id === row.id).map((item) => toCamelRecord<any>(item)),
+      }));
+      if (!quoteRows.error && !quoteItemRows.error) setStored<Quote[]>(STORAGE_KEYS.QUOTES, quotes);
+
+      const invoiceItems = rows(invoiceItemRows, 'invoice items');
+      const payments = rows(paymentRows, 'payments');
+      const invoices = rows(invoiceRows, 'invoices').map((row) => ({
+        ...toCamelRecord<Invoice>(row),
+        items: invoiceItems.filter((item) => item.invoice_id === row.id).map((item) => toCamelRecord<any>(item)),
+        payments: payments.filter((payment) => payment.invoice_id === row.id).map((payment) => ({
+          ...toCamelRecord<Payment>(payment),
+          recordedBy: payment.recorded_by,
+        })),
+      }));
+      if (!invoiceRows.error && !invoiceItemRows.error && !paymentRows.error) {
+        setStored<Invoice[]>(STORAGE_KEYS.INVOICES, invoices);
+      }
+
+      const requests = rows(dataRequestRows, 'data requests').map((row) => toCamelRecord<DataRequest>(row));
+      if (!dataRequestRows.error) setStored<DataRequest[]>(STORAGE_KEYS.DATA_REQUESTS, requests);
+
+      const audit = rows(auditRows, 'audit logs').map((row) => ({
+        ...toCamelRecord<AuditLog>(row),
+        timestamp: row.created_at,
+      }));
+      if (!auditRows.error) setStored<AuditLog[]>(STORAGE_KEYS.AUDIT, audit);
+
+      const allServices = rows(serviceRows, 'services').map((row) => toCamelRecord<Service>(row));
+      if (!serviceRows.error) setStored<Service[]>(STORAGE_KEYS.ADMIN_SERVICES, allServices);
+
+      const allReviews = rows(reviewRows, 'reviews').map((row) => ({
+        ...toCamelRecord<Review>(row),
+        date: row.review_date,
+        isVerified: Boolean(row.is_verified),
+        moderationStatus: row.moderation_status,
+      }));
+      if (!reviewRows.error) setStored<Review[]>(STORAGE_KEYS.ADMIN_REVIEWS, allReviews);
+
+      dispatchCatalogUpdated();
+    } catch (error) {
+      console.error('Unable to refresh staff records from Supabase:', error);
+      throw new Error('The staff workspace could not load its records. Please refresh and try again.');
     }
   },
 
